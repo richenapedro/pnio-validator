@@ -1,3 +1,10 @@
+Metadata-Version: 2.4
+Name: pnio-validator
+Version: 0.1.0
+Summary: PROFINET IO strict validation tool (WIP)
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+
 # pnio-validator
 
 PNIO Validator is a PROFINET IO device validation tool that performs strict controller-level checks. It validates GSDML consistency, executes acyclic PNIO CM Read Implicit requests (e.g., 0xAFF0, 0xF841), and detects interoperability issues (I&M, slot/subslot, API, fragmentation, timeouts).
