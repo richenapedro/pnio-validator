@@ -8,6 +8,7 @@ from datetime import datetime
 
 from .adapters import list_adapters, resolve_iface
 from .scanner import scan_dcp
+from .gsdml_parser import parse_gsdml
 from .pnio_client import PnioClient, PnioClientConfig
 from .validator import HeidenhainStrictValidator, ValidationConfig, RealPnioClientAdapter
 from .pnio_client_fake import FakePnioClient, FakeScenario
@@ -115,6 +116,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         print(f"PDF report written: {pdf}")
 
     return 0 if result.ok else 2
+
 def _cmd_suite(args: argparse.Namespace) -> int:
     # Suite currently supports fake mode only
     if not args.fake:
@@ -144,6 +146,20 @@ def _cmd_suite(args: argparse.Namespace) -> int:
     )
 
     print(json.dumps(summary, indent=2))
+    return 0
+
+def _cmd_gsdml_parse(args: argparse.Namespace) -> int:
+    model = parse_gsdml(args.file)
+
+    if args.json or not args.out:
+        print(model.to_json())
+
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        model.save_json(out)
+        print(f"Written: {out}")
+
     return 0
 
 def build_parser() -> argparse.ArgumentParser:
@@ -204,6 +220,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_suite.add_argument("--extra-latency-ms", type=float, default=0.0, help="Fake additional latency in ms.")
     p_suite.set_defaults(fn=_cmd_suite)
 
+    p_gsdml = sub.add_parser("gsdml", help="GSDML utilities.")
+    gsdml_sub = p_gsdml.add_subparsers(dest="gsdml_cmd", required=True)
+
+    p_gsdml_parse = gsdml_sub.add_parser("parse", help="Parse a GSDML XML file and export JSON.")
+    p_gsdml_parse.add_argument("--file", required=True, help="Path to GSDML XML file.")
+    p_gsdml_parse.add_argument("--out", default="", help="Write parsed model as JSON to this path.")
+    p_gsdml_parse.add_argument("--json", action="store_true", help="Print parsed model as JSON.")
+    p_gsdml_parse.set_defaults(fn=_cmd_gsdml_parse)
 
     return p
 

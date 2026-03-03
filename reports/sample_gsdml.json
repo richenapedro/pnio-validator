@@ -1,0 +1,43 @@
+{
+  "file_path": "tests\\fixtures\\sample_gsdml.xml",
+  "profile_header": {
+    "ProfileIdentification": "PROFINET IO",
+    "ProfileRevision": "2.35",
+    "ProfileName": "Sample"
+  },
+  "device_identity": {
+    "VendorId": "0x1234",
+    "DeviceId": "0x5678",
+    "ProductName": "EM31 Sample"
+  },
+  "dap": {
+    "id": "DAP_1",
+    "module_ident_number": 1,
+    "name": "Device Access Point"
+  },
+  "modules": [
+    {
+      "id": "MOD_1",
+      "module_ident_number": 4097,
+      "name": "Module 1",
+      "submodules": [
+        {
+          "id": "SUB_1",
+          "submodule_ident_number": 8193,
+          "name": "Submodule 1"
+        },
+        {
+          "id": "SUB_2",
+          "submodule_ident_number": 8194,
+          "name": "Submodule 2"
+        }
+      ]
+    }
+  ],
+  "texts": {
+    "T_DAP": "Device Access Point",
+    "T_MOD1": "Module 1",
+    "T_SUB1": "Submodule 1",
+    "T_SUB2": "Submodule 2"
+  }
+}

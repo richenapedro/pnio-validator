@@ -17,4 +17,5 @@ src/pnio_validator.egg-info/dependency_links.txt
 src/pnio_validator.egg-info/entry_points.txt
 src/pnio_validator.egg-info/requires.txt
 src/pnio_validator.egg-info/top_level.txt
+tests/test_gsdml_parser.py
 tests/test_validator.py

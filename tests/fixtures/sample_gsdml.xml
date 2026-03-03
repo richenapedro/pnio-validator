@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ISO15745Profile xmlns="http://www.profibus.com/GSDML/2003/11/DeviceProfile">
+  <ProfileHeader ProfileIdentification="PROFINET IO" ProfileRevision="2.35" ProfileName="Sample" />
+  <ProfileBody>
+    <DeviceIdentity VendorId="0x1234" DeviceId="0x5678" ProductName="EM31 Sample" />
+    <DeviceFunction>
+      <ApplicationProcess>
+        <DeviceAccessPointList>
+          <DeviceAccessPointItem ID="DAP_1" ModuleIdentNumber="0x00000001" TextId="T_DAP" />
+        </DeviceAccessPointList>
+        <ModuleList>
+          <ModuleItem ID="MOD_1" ModuleIdentNumber="0x00001001" TextId="T_MOD1">
+            <VirtualSubmoduleList>
+              <SubmoduleItem ID="SUB_1" SubmoduleIdentNumber="0x00002001" TextId="T_SUB1" />
+              <SubmoduleItem ID="SUB_2" SubmoduleIdentNumber="0x00002002" TextId="T_SUB2" />
+            </VirtualSubmoduleList>
+          </ModuleItem>
+        </ModuleList>
+      </ApplicationProcess>
+    </DeviceFunction>
+
+    <ExternalTextList>
+      <ExternalText TextId="T_DAP"><Text Value="Device Access Point"/></ExternalText>
+      <ExternalText TextId="T_MOD1"><Text Value="Module 1"/></ExternalText>
+      <ExternalText TextId="T_SUB1"><Text Value="Submodule 1"/></ExternalText>
+      <ExternalText TextId="T_SUB2"><Text Value="Submodule 2"/></ExternalText>
+    </ExternalTextList>
+  </ProfileBody>
+</ISO15745Profile>
