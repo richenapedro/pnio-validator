@@ -4,6 +4,8 @@ Version: 0.1.0
 Summary: PROFINET IO strict validation tool (WIP)
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
+Requires-Dist: scapy>=2.6.0
+Requires-Dist: reportlab>=4.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0.0; extra == "dev"
 

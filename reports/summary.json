@@ -1,0 +1,31 @@
+{
+  "device_name": "em31-new",
+  "mode": "fake",
+  "out_dir": "reports",
+  "scenarios": [
+    {
+      "scenario": "ok",
+      "ok": true,
+      "json": "reports\\ok.json",
+      "pdf": "reports\\ok.pdf"
+    },
+    {
+      "scenario": "f841_short",
+      "ok": false,
+      "json": "reports\\f841_short.json",
+      "pdf": "reports\\f841_short.pdf"
+    },
+    {
+      "scenario": "f841_timeout",
+      "ok": false,
+      "json": "reports\\f841_timeout.json",
+      "pdf": "reports\\f841_timeout.pdf"
+    },
+    {
+      "scenario": "random_latency",
+      "ok": true,
+      "json": "reports\\random_latency.json",
+      "pdf": "reports\\random_latency.pdf"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "meta": {
+    "generated_at": "2026-03-03T11:18:48",
+    "mode": "fake",
+    "scenario": "random_latency",
+    "iface": null,
+    "adapter": null,
+    "device_name": "em31-new",
+    "timeout_ms": 3000,
+    "retries": 1,
+    "len_aff0": 2048,
+    "len_f841": 24576,
+    "min_aff0_bytes": 32,
+    "min_f841_ratio": 0.9
+  },
+  "result": {
+    "device_name": "em31-new",
+    "ok": true,
+    "records": {
+      "0xAFF0": {
+        "index": 45040,
+        "ok": true,
+        "requested_len": 2048,
+        "min_expected_len": 32,
+        "bytes_len": 64,
+        "latency_ms": 65.99129999995057,
+        "error": null,
+        "attempts": 1
+      },
+      "0xF841": {
+        "index": 63553,
+        "ok": true,
+        "requested_len": 24576,
+        "min_expected_len": 22118,
+        "bytes_len": 24576,
+        "latency_ms": 65.99310000001424,
+        "error": null,
+        "attempts": 1
+      }
+    }
+  }
+}

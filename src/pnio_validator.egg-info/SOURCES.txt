@@ -9,6 +9,7 @@ src/pnio_validator/pnio_client.py
 src/pnio_validator/pnio_client_fake.py
 src/pnio_validator/report.py
 src/pnio_validator/scanner.py
+src/pnio_validator/suite.py
 src/pnio_validator/validator.py
 src/pnio_validator.egg-info/PKG-INFO
 src/pnio_validator.egg-info/SOURCES.txt

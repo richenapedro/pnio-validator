@@ -1,0 +1,42 @@
+{
+  "meta": {
+    "generated_at": "2026-03-03T11:18:47",
+    "mode": "fake",
+    "scenario": "f841_timeout",
+    "iface": null,
+    "adapter": null,
+    "device_name": "em31-new",
+    "timeout_ms": 3000,
+    "retries": 1,
+    "len_aff0": 2048,
+    "len_f841": 24576,
+    "min_aff0_bytes": 32,
+    "min_f841_ratio": 0.9
+  },
+  "result": {
+    "device_name": "em31-new",
+    "ok": false,
+    "records": {
+      "0xAFF0": {
+        "index": 45040,
+        "ok": true,
+        "requested_len": 2048,
+        "min_expected_len": 32,
+        "bytes_len": 64,
+        "latency_ms": 15.161399999669811,
+        "error": null,
+        "attempts": 1
+      },
+      "0xF841": {
+        "index": 63553,
+        "ok": false,
+        "requested_len": 24576,
+        "min_expected_len": 0,
+        "bytes_len": 0,
+        "latency_ms": 0.0,
+        "error": "timeout: Simulated timeout on 0xF841",
+        "attempts": 2
+      }
+    }
+  }
+}
