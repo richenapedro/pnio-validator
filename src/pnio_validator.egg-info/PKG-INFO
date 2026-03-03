@@ -4,6 +4,8 @@ Version: 0.1.0
 Summary: PROFINET IO strict validation tool (WIP)
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
 
 # pnio-validator
 
