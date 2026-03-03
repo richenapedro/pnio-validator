@@ -15,7 +15,8 @@ from .pnio_client_fake import FakePnioClient, FakeScenario
 from .report import write_report_json, write_report_pdf, ReportMeta
 from .suite import run_fake_suite, SuiteRunConfig
 from .registry import import_gsdml, list_registry, match_device_to_gsd
-
+from .dcp import DcpClient
+from .dcp_fake import FakeDcpClient
 
 def _cmd_adapters(args: argparse.Namespace) -> int:
     adapters = list_adapters()
@@ -280,6 +281,36 @@ def _cmd_match(args: argparse.Namespace) -> int:
 
     print(f"No match found. ({reason})")
     return 2
+
+def _cmd_dcp_set_name(args: argparse.Namespace) -> int:
+    iface = resolve_iface(args.iface, args.adapter)
+    client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
+    res = client.set_name(target_mac=args.mac, name=args.name, wait_response=not args.no_wait)
+    print(json.dumps(res.to_dict(), indent=2, ensure_ascii=False) if args.json else res.to_dict())
+    return 0 if res.ok else 2
+
+
+def _cmd_dcp_set_ip(args: argparse.Namespace) -> int:
+    iface = resolve_iface(args.iface, args.adapter)
+    client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
+    res = client.set_ip(
+        target_mac=args.mac,
+        ip=args.ip,
+        mask=args.mask,
+        gw=args.gw,
+        wait_response=not args.no_wait,
+    )
+    print(json.dumps(res.to_dict(), indent=2, ensure_ascii=False) if args.json else res.to_dict())
+    return 0 if res.ok else 2
+
+
+def _cmd_dcp_factory_reset(args: argparse.Namespace) -> int:
+    iface = resolve_iface(args.iface, args.adapter)
+    client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
+    res = client.factory_reset(target_mac=args.mac)
+    print(json.dumps(res.to_dict(), indent=2, ensure_ascii=False) if args.json else res.to_dict())
+    return 0 if res.ok else 2
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pnio-validator", description="PROFINET IO strict validation tool (WIP).")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -373,6 +404,45 @@ def build_parser() -> argparse.ArgumentParser:
     p_match.add_argument("--json", action="store_true", help="Print as JSON.")
     p_match.set_defaults(fn=_cmd_match)
     
+    p_dcp = sub.add_parser("dcp", help="PRONETA-like DCP configuration utilities.")
+    dcp_sub = p_dcp.add_subparsers(dest="dcp_cmd", required=True)
+
+    # Common target selection
+    def _add_target(g):
+        mg = g.add_mutually_exclusive_group(required=True)
+        mg.add_argument("--iface", help="Scapy/Npcap interface name (e.g. \\\\Device\\\\NPF_{GUID}).")
+        mg.add_argument("--adapter", type=int, help="Adapter index from `pnio-validator adapters`.")
+
+    p_dcp_name = dcp_sub.add_parser("set-name", help="Set PROFINET NameOfStation via DCP.")
+    _add_target(p_dcp_name)
+    p_dcp_name.add_argument("--mac", required=True, help="Target device MAC address.")
+    p_dcp_name.add_argument("--name", required=True, help="New station name.")
+    p_dcp_name.add_argument("--timeout", type=float, default=3.0, help="Response wait timeout in seconds.")
+    p_dcp_name.add_argument("--no-wait", action="store_true", help="Do not wait for a DCP response.")
+    p_dcp_name.add_argument("--fake", action="store_true", help="Use fake DCP client (offline).")
+    p_dcp_name.add_argument("--json", action="store_true", help="Print as JSON.")
+    p_dcp_name.set_defaults(fn=_cmd_dcp_set_name)
+
+    p_dcp_ip = dcp_sub.add_parser("set-ip", help="Set IP/Mask/Gateway via DCP.")
+    _add_target(p_dcp_ip)
+    p_dcp_ip.add_argument("--mac", required=True, help="Target device MAC address.")
+    p_dcp_ip.add_argument("--ip", required=True, help="IPv4 address.")
+    p_dcp_ip.add_argument("--mask", required=True, help="IPv4 subnet mask.")
+    p_dcp_ip.add_argument("--gw", default="0.0.0.0", help="IPv4 gateway.")
+    p_dcp_ip.add_argument("--timeout", type=float, default=3.0, help="Response wait timeout in seconds.")
+    p_dcp_ip.add_argument("--no-wait", action="store_true", help="Do not wait for a DCP response.")
+    p_dcp_ip.add_argument("--fake", action="store_true", help="Use fake DCP client (offline).")
+    p_dcp_ip.add_argument("--json", action="store_true", help="Print as JSON.")
+    p_dcp_ip.set_defaults(fn=_cmd_dcp_set_ip)
+
+    p_dcp_reset = dcp_sub.add_parser("factory-reset", help="Factory reset (capability placeholder; vendor-specific).")
+    _add_target(p_dcp_reset)
+    p_dcp_reset.add_argument("--mac", required=True, help="Target device MAC address.")
+    p_dcp_reset.add_argument("--timeout", type=float, default=3.0, help="Response wait timeout in seconds.")
+    p_dcp_reset.add_argument("--fake", action="store_true", help="Use fake DCP client (offline).")
+    p_dcp_reset.add_argument("--json", action="store_true", help="Print as JSON.")
+    p_dcp_reset.set_defaults(fn=_cmd_dcp_factory_reset)
+
     return p
 
 
