@@ -8,12 +8,13 @@ from datetime import datetime
 
 from .adapters import list_adapters, resolve_iface
 from .scanner import scan_dcp
-from .gsdml_parser import parse_gsdml
+from .gsdml_parser import parse_gsdml, summarize_gsdml, export_expected_model
 from .pnio_client import PnioClient, PnioClientConfig
 from .validator import HeidenhainStrictValidator, ValidationConfig, RealPnioClientAdapter
 from .pnio_client_fake import FakePnioClient, FakeScenario
 from .report import write_report_json, write_report_pdf, ReportMeta
 from .suite import run_fake_suite, SuiteRunConfig
+from .registry import import_gsdml, list_registry, match_device_to_gsd
 
 
 def _cmd_adapters(args: argparse.Namespace) -> int:
@@ -37,6 +38,49 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     iface = resolve_iface(args.iface, args.adapter)
     devices = scan_dcp(iface=iface, timeout_s=args.timeout)
 
+    if args.match_gsd:
+        matched = []
+        for d in devices:
+            entry, reason, score = match_device_to_gsd(
+                vendor_id=d.vendor_id,
+                device_id=d.device_id,
+                name=d.name,
+            )
+            md = d.to_dict()
+            md["gsd_match"] = None if entry is None else entry.to_dict()
+            md["gsd_match_reason"] = reason
+            md["gsd_match_score"] = score
+            matched.append(md)
+
+        if args.json:
+            print(json.dumps(matched, indent=2, ensure_ascii=False))
+            return 0
+
+        if not matched:
+            print("No devices found.")
+            return 0
+
+        for md in matched:
+            dname = md.get("name") or "<no-name>"
+            ip = md.get("ip") or "-"
+            mac = md.get("mac")
+            vid = md.get("vendor_id")
+            did = md.get("device_id")
+
+            g = md["gsd_match"]
+            if g:
+                print(
+                    f"- {dname}  ip={ip}  mac={mac}  vendor={vid}  device={did}  "
+                    f"-> GSD={Path(g['file']).name} ({md['gsd_match_reason']}, score={md['gsd_match_score']})"
+                )
+            else:
+                print(
+                    f"- {dname}  ip={ip}  mac={mac}  vendor={vid}  device={did}  "
+                    f"-> GSD=<none> ({md['gsd_match_reason']})"
+                )
+        return 0
+
+    # Default: previous behavior (no matching)
     if args.json:
         print(json.dumps([d.to_dict() for d in devices], indent=2))
     else:
@@ -52,6 +96,9 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
+    if not args.fake and not (args.iface or args.adapter is not None):
+        print("Please provide --iface or --adapter (or use --fake).")
+        return 2
     # If running fake mode, no network interface is required
     iface = None if args.fake else resolve_iface(args.iface, args.adapter)
 
@@ -162,6 +209,77 @@ def _cmd_gsdml_parse(args: argparse.Namespace) -> int:
 
     return 0
 
+def _cmd_gsdml_summarize(args: argparse.Namespace) -> int:
+    model = parse_gsdml(args.file)
+    print(summarize_gsdml(model))
+    return 0
+
+
+def _cmd_gsdml_export_expected(args: argparse.Namespace) -> int:
+    model = parse_gsdml(args.file)
+    expected = export_expected_model(model)
+
+    if args.json or not args.out:
+        print(json.dumps(expected, indent=2, ensure_ascii=False))
+
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(expected, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"Written: {out}")
+
+    return 0
+
+def _cmd_gsdml_import(args: argparse.Namespace) -> int:
+    entry = import_gsdml(args.file)
+    print(json.dumps(entry.to_dict(), indent=2, ensure_ascii=False))
+    return 0
+
+
+def _cmd_gsdml_list(args: argparse.Namespace) -> int:
+    entries = list_registry()
+    if args.json:
+        print(json.dumps([e.to_dict() for e in entries], indent=2, ensure_ascii=False))
+        return 0
+
+    if not entries:
+        print("Registry is empty. Import a GSDML first: pnio-validator gsdml import --file <path>")
+        return 0
+
+    for e in entries:
+        print(f"- {e.vendor_id}:{e.device_id}  {e.product_name or '-'}  file={Path(e.file).name}")
+    return 0
+def _cmd_match(args: argparse.Namespace) -> int:
+    vendor_id = int(str(args.vendor_id), 0)
+    device_id = int(str(args.device_id), 0)
+
+    entry, reason, score = match_device_to_gsd(
+        vendor_id=vendor_id,
+        device_id=device_id,
+        name=args.name or "",
+    )
+
+    if args.json:
+        payload = {
+            "vendor_id": f"0x{vendor_id:x}",
+            "device_id": f"0x{device_id:x}",
+            "name": args.name,
+            "match": None if entry is None else entry.to_dict(),
+            "reason": reason,
+            "score": score,
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0 if entry else 2
+
+    if entry:
+        print(f"Match: {Path(entry.file).name}  ({reason}, score={score})")
+        print(f"Vendor/Device: {entry.vendor_id}:{entry.device_id}")
+        if entry.product_name:
+            print(f"Product: {entry.product_name}")
+        return 0
+
+    print(f"No match found. ({reason})")
+    return 2
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pnio-validator", description="PROFINET IO strict validation tool (WIP).")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -176,6 +294,7 @@ def build_parser() -> argparse.ArgumentParser:
     g1.add_argument("--adapter", type=int, help="Adapter index from `pnio-validator adapters`.")
     p_scan.add_argument("--timeout", type=float, default=5.0, help="Scan timeout in seconds.")
     p_scan.add_argument("--json", action="store_true", help="Print as JSON.")
+    p_scan.add_argument("--match-gsd", action="store_true", help="Match discovered devices against imported GSDML registry.")
     p_scan.set_defaults(fn=_cmd_scan)
 
     p_val = sub.add_parser("validate", help="Run strict validation (stub).")
@@ -229,6 +348,31 @@ def build_parser() -> argparse.ArgumentParser:
     p_gsdml_parse.add_argument("--json", action="store_true", help="Print parsed model as JSON.")
     p_gsdml_parse.set_defaults(fn=_cmd_gsdml_parse)
 
+    p_gsdml_sum = gsdml_sub.add_parser("summarize", help="Print a human-readable summary of a GSDML file.")
+    p_gsdml_sum.add_argument("--file", required=True, help="Path to GSDML XML file.")
+    p_gsdml_sum.set_defaults(fn=_cmd_gsdml_summarize)
+
+    p_gsdml_exp = gsdml_sub.add_parser("export-expected", help="Export a compact expected model JSON for comparisons.")
+    p_gsdml_exp.add_argument("--file", required=True, help="Path to GSDML XML file.")
+    p_gsdml_exp.add_argument("--out", default="", help="Write expected model JSON to this path.")
+    p_gsdml_exp.add_argument("--json", action="store_true", help="Print expected model as JSON.")
+    p_gsdml_exp.set_defaults(fn=_cmd_gsdml_export_expected)
+
+    p_gsdml_imp = gsdml_sub.add_parser("import", help="Import a GSDML file into the local registry.")
+    p_gsdml_imp.add_argument("--file", required=True, help="Path to GSDML XML file.")
+    p_gsdml_imp.set_defaults(fn=_cmd_gsdml_import)
+
+    p_gsdml_list = gsdml_sub.add_parser("list", help="List imported GSDML entries.")
+    p_gsdml_list.add_argument("--json", action="store_true", help="Print as JSON.")
+    p_gsdml_list.set_defaults(fn=_cmd_gsdml_list)
+
+    p_match = sub.add_parser("match", help="Match a (vendor_id, device_id) against imported GSDML registry.")
+    p_match.add_argument("--vendor-id", required=True, help="VendorId (e.g. 0x1234 or 4660).")
+    p_match.add_argument("--device-id", required=True, help="DeviceId (e.g. 0x5678 or 22136).")
+    p_match.add_argument("--name", default="", help="Optional device name for heuristic matching.")
+    p_match.add_argument("--json", action="store_true", help="Print as JSON.")
+    p_match.set_defaults(fn=_cmd_match)
+    
     return p
 
 

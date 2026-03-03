@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated_at": "2026-03-03T11:18:48",
+    "generated_at": "2026-03-03T11:33:25",
     "mode": "fake",
     "scenario": "random_latency",
     "iface": null,
@@ -23,7 +23,7 @@
         "requested_len": 2048,
         "min_expected_len": 32,
         "bytes_len": 64,
-        "latency_ms": 65.99129999995057,
+        "latency_ms": 65.5096999998932,
         "error": null,
         "attempts": 1
       },
@@ -33,7 +33,7 @@
         "requested_len": 24576,
         "min_expected_len": 22118,
         "bytes_len": 24576,
-        "latency_ms": 65.99310000001424,
+        "latency_ms": 66.70670000039536,
         "error": null,
         "attempts": 1
       }

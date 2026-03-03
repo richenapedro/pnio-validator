@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated_at": "2026-03-03T11:18:47",
+    "generated_at": "2026-03-03T11:33:25",
     "mode": "fake",
     "scenario": "f841_timeout",
     "iface": null,
@@ -23,7 +23,7 @@
         "requested_len": 2048,
         "min_expected_len": 32,
         "bytes_len": 64,
-        "latency_ms": 15.161399999669811,
+        "latency_ms": 15.42429999972228,
         "error": null,
         "attempts": 1
       },

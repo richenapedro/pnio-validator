@@ -7,6 +7,7 @@ src/pnio_validator/gsdml_parser.py
 src/pnio_validator/models.py
 src/pnio_validator/pnio_client.py
 src/pnio_validator/pnio_client_fake.py
+src/pnio_validator/registry.py
 src/pnio_validator/report.py
 src/pnio_validator/scanner.py
 src/pnio_validator/suite.py
@@ -17,5 +18,8 @@ src/pnio_validator.egg-info/dependency_links.txt
 src/pnio_validator.egg-info/entry_points.txt
 src/pnio_validator.egg-info/requires.txt
 src/pnio_validator.egg-info/top_level.txt
+tests/test_cli_match.py
 tests/test_gsdml_parser.py
+tests/test_gsdml_summarize.py
+tests/test_registry.py
 tests/test_validator.py

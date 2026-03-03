@@ -229,3 +229,106 @@ def parse_gsdml(path: str | Path) -> GsdmlModel:
         modules=modules,
         texts=texts,
     )
+
+def summarize_gsdml(model: GsdmlModel, max_modules: int = 200) -> str:
+    """
+    Create a human-readable summary of the parsed GSDML.
+
+    Output is plain text so it is friendly for terminals, logs and CI.
+    """
+    lines: List[str] = []
+
+    # Header
+    ph = model.profile_header
+    di = model.device_identity
+
+    lines.append(f"File: {model.file_path}")
+    if ph:
+        lines.append(
+            "ProfileHeader: "
+            + ", ".join(f"{k}={v}" for k, v in ph.items())
+        )
+    if di:
+        lines.append(
+            "DeviceIdentity: "
+            + ", ".join(f"{k}={v}" for k, v in di.items())
+        )
+
+    # DAP
+    if model.dap is None:
+        lines.append("DAP: <not found>")
+    else:
+        dap_ident = (
+            f"0x{model.dap.module_ident_number:08X}"
+            if model.dap.module_ident_number is not None
+            else "-"
+        )
+        lines.append(f"DAP: {model.dap.name or '-'}  id={model.dap.id or '-'}  ident={dap_ident}")
+
+    # Modules
+    lines.append("")
+    lines.append("Modules:")
+    if not model.modules:
+        lines.append("  <none>")
+        return "\n".join(lines)
+
+    count = 0
+    for m in model.modules:
+        count += 1
+        if count > max_modules:
+            lines.append(f"  ... truncated (max_modules={max_modules})")
+            break
+
+        m_ident = f"0x{m.module_ident_number:08X}" if m.module_ident_number is not None else "-"
+        lines.append(f"  - {m.name or '-'}  id={m.id or '-'}  ident={m_ident}")
+
+        if not m.submodules:
+            lines.append("      (no submodules parsed)")
+            continue
+
+        for s in m.submodules[:200]:
+            s_ident = f"0x{s.submodule_ident_number:08X}" if s.submodule_ident_number is not None else "-"
+            lines.append(f"      * {s.name or '-'}  id={s.id or '-'}  ident={s_ident}")
+
+        if len(m.submodules) > 200:
+            lines.append(f"      ... truncated submodules ({len(m.submodules)} total)")
+
+    return "\n".join(lines)
+
+
+def export_expected_model(model: GsdmlModel) -> dict:
+    """
+    Export an 'expected model' in a compact format suitable for later comparisons
+    against real device reads (RealIdentificationData / ModuleDiff-like checks).
+    """
+    expected = {
+        "profile_header": dict(model.profile_header),
+        "device_identity": dict(model.device_identity),
+        "dap": None
+        if model.dap is None
+        else {
+            "id": model.dap.id,
+            "module_ident_number": model.dap.module_ident_number,
+            "name": model.dap.name,
+        },
+        "modules": [],
+    }
+
+    for m in model.modules:
+        expected["modules"].append(
+            {
+                "id": m.id,
+                "module_ident_number": m.module_ident_number,
+                "name": m.name,
+                "submodules": [
+                    {
+                        "id": s.id,
+                        "submodule_ident_number": s.submodule_ident_number,
+                        "name": s.name,
+                    }
+                    for s in m.submodules
+                ],
+            }
+        )
+
+    return expected

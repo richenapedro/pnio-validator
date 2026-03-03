@@ -1,0 +1,8 @@
+{
+  "0x1234:0x5678": {
+    "file": "data/gsdml/sample_gsdml.xml",
+    "vendor_id": "0x1234",
+    "device_id": "0x5678",
+    "product_name": "EM31 Sample"
+  }
+}
