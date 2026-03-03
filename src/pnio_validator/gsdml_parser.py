@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import xml.etree.ElementTree as ET
 
 
@@ -29,13 +29,6 @@ def _find_all(root: ET.Element, tag: str) -> List[ET.Element]:
         if _strip_ns(el.tag) == tag:
             out.append(el)
     return out
-
-
-@dataclass(frozen=True)
-class GsdmlText:
-    """Text resolved from ExternalTextList."""
-    text_id: str
-    value: str
 
 
 @dataclass(frozen=True)
@@ -127,7 +120,9 @@ def _parse_int_maybe(s: Optional[str]) -> Optional[int]:
 def _parse_external_texts(root: ET.Element) -> Dict[str, str]:
     """
     Parse ExternalTextList into a dict: TextId -> Value.
-    GSDML commonly uses <ExternalText TextId="..."><Text Value="..."/></ExternalText>
+
+    GSDML commonly uses:
+      <ExternalText TextId="..."><Text Value="..."/></ExternalText>
     """
     texts: Dict[str, str] = {}
     for ext in _find_all(root, "ExternalText"):
@@ -135,7 +130,6 @@ def _parse_external_texts(root: ET.Element) -> Dict[str, str]:
         if not text_id:
             continue
 
-        # Typically: <ExternalText ...><Text Value="..."/></ExternalText>
         value = None
         for ch in list(ext):
             if _strip_ns(ch.tag) == "Text":
@@ -157,7 +151,10 @@ def _resolve_name(texts: Dict[str, str], text_id: Optional[str]) -> Optional[str
 def parse_gsdml(path: str | Path) -> GsdmlModel:
     """
     Parse a GSDML file into a structured model.
-    Namespace handling is done in a tolerant way (by stripping namespaces).
+
+    This parser is tolerant by design:
+    - It strips namespaces and searches by local tag names.
+    - It extracts DAP, ModuleItem, SubmoduleItem and resolves ExternalTextList.
     """
     p = Path(path)
     tree = ET.parse(p)
@@ -165,7 +162,6 @@ def parse_gsdml(path: str | Path) -> GsdmlModel:
 
     texts = _parse_external_texts(root)
 
-    # ProfileHeader (best-effort)
     profile_header: Dict[str, str] = {}
     ph = _find_first(root, "ProfileHeader")
     if ph is not None:
@@ -174,7 +170,6 @@ def parse_gsdml(path: str | Path) -> GsdmlModel:
             if v:
                 profile_header[k] = v
 
-    # DeviceIdentity / DeviceFunction / DeviceInfo vary by vendor; best-effort fields
     device_identity: Dict[str, str] = {}
     dev = _find_first(root, "DeviceIdentity")
     if dev is not None:
@@ -183,7 +178,6 @@ def parse_gsdml(path: str | Path) -> GsdmlModel:
             if v:
                 device_identity[k] = v
 
-    # DAP: DeviceAccessPointItem
     dap_item = _find_first(root, "DeviceAccessPointItem")
     dap: Optional[GsdmlDap] = None
     if dap_item is not None:
@@ -192,7 +186,6 @@ def parse_gsdml(path: str | Path) -> GsdmlModel:
         dap_name = _resolve_name(texts, dap_item.attrib.get("TextId"))
         dap = GsdmlDap(id=dap_id, module_ident_number=dap_ident, name=dap_name)
 
-    # Modules/Submodules: ModuleItem / SubmoduleItem
     modules: List[GsdmlModule] = []
     for mi in _find_all(root, "ModuleItem"):
         mid = mi.attrib.get("ID")
@@ -200,9 +193,6 @@ def parse_gsdml(path: str | Path) -> GsdmlModel:
         mname = _resolve_name(texts, mi.attrib.get("TextId"))
 
         submods: List[GsdmlSubmodule] = []
-        # Many GSDMLs reference submodules via <UseableSubmodules> or <VirtualSubmoduleList>,
-        # but for MVP we parse submodule definitions globally.
-        # We'll also parse nested SubmoduleItem definitions if present under ModuleItem (some vendors do).
         for si in mi.iter():
             if _strip_ns(si.tag) != "SubmoduleItem":
                 continue
@@ -213,9 +203,8 @@ def parse_gsdml(path: str | Path) -> GsdmlModel:
 
         modules.append(GsdmlModule(id=mid, module_ident_number=mident, name=mname, submodules=submods))
 
-    # If ModuleItems list is empty, fallback to global SubmoduleItem list (still useful)
+    # Fallback: if there are no ModuleItem entries, still expose SubmoduleItem entries.
     if not modules:
-        # Create a synthetic module to hold submodules
         submods: List[GsdmlSubmodule] = []
         for si in _find_all(root, "SubmoduleItem"):
             sid = si.attrib.get("ID")
@@ -223,7 +212,14 @@ def parse_gsdml(path: str | Path) -> GsdmlModel:
             sname = _resolve_name(texts, si.attrib.get("TextId"))
             submods.append(GsdmlSubmodule(id=sid, submodule_ident_number=sident, name=sname))
         if submods:
-            modules.append(GsdmlModule(id="__GLOBAL__", module_ident_number=None, name="GlobalSubmodules", submodules=submods))
+            modules.append(
+                GsdmlModule(
+                    id="__GLOBAL__",
+                    module_ident_number=None,
+                    name="GlobalSubmodules",
+                    submodules=submods,
+                )
+            )
 
     return GsdmlModel(
         file_path=str(p),
