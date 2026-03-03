@@ -202,6 +202,53 @@ class DcpClient:
             latency_ms=dt,
         )
 
+    def blink(self, *, target_mac: str, on: bool, duration_s: float = 10.0, wait_response: bool = True) -> DcpResult:
+        """
+        Best-effort 'identify device' / 'blink LED' action.
+
+        IMPORTANT:
+        - PROFINET LED blinking is not universally standardized.
+        - Many devices implement it via vendor-specific DCP blocks or via PNIO records.
+        - This implementation sends a conservative DCP Set block that some devices accept.
+        - Even if no response is observed, we still report ok=True (sent), similar to other DCP Set actions.
+        """
+        # Heuristic: use Device Properties / "Control" style block.
+        # opt=0x02 (Device Properties), sub=0x04 (Control) is used by some stacks.
+        # Data format differs between vendors; we use a minimal toggle:
+        #   byte0: 0x01 = blink on, 0x00 = blink off
+        #   byte1..: duration seconds (uint16, big-endian) if on
+        xid = int(time.time() * 1000).to_bytes(4, "big", signed=False)
+
+        flag = b"\x01" if on else b"\x00"
+        dur = int(max(0.0, float(duration_s)))
+        dur_bytes = dur.to_bytes(2, "big", signed=False)
+        data = flag + dur_bytes
+
+        # Build a custom DCP Set payload using a "control" block.
+        b1 = _block(opt=0x02, sub=0x04, data=data)
+        blocks = _pad_even(b1)
+        header = _build_dcp_set_header(xid=xid)
+        payload = header + len(blocks).to_bytes(2, "big") + blocks
+
+        t0 = time.time()
+        frame = Ether(dst=target_mac, src=self._src_mac(), type=PNIO_ETHERTYPE) / Raw(load=payload)
+        conf.iface = self.iface
+        sendp(frame, iface=self.iface, verbose=False)
+
+        got = _wait_for_set_response(iface=self.iface, target_mac=target_mac, xid=xid, timeout_s=self.timeout_s) if wait_response else False
+        dt = (time.time() - t0) * 1000.0
+
+        # We cannot guarantee vendor support. Return ok=True as "sent".
+        # If you prefer strict behavior later, we can add --strict to require a response.
+        return DcpResult(
+            ok=True,
+            action="dcp_blink_on" if on else "dcp_blink_off",
+            target_mac=target_mac,
+            error=None,
+            latency_ms=dt,
+        )    
+
+
     def factory_reset(self, *, target_mac: str) -> DcpResult:
         # Not standardized across devices; keep as stub/capability placeholder.
         return DcpResult(

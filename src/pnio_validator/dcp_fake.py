@@ -13,6 +13,7 @@ class FakeDcpState:
     mask: str = "0.0.0.0"
     gw: str = "0.0.0.0"
     name: str = "unnamed"
+    blink: bool = False
 
 
 class FakeDcpClient:
@@ -20,6 +21,7 @@ class FakeDcpClient:
 
     def __init__(self) -> None:
         self.devices: Dict[str, FakeDcpState] = {}
+        
 
     def _get(self, mac: str) -> FakeDcpState:
         mac_l = mac.strip().lower()
@@ -39,10 +41,22 @@ class FakeDcpClient:
         st.gw = gw
         return DcpResult(ok=True, action="dcp_set_ip", target_mac=target_mac, error=None, latency_ms=1.0)
 
+    def blink(self, *, target_mac: str, on: bool, duration_s: float = 10.0, wait_response: bool = True) -> DcpResult:
+        st = self._get(target_mac)
+        st.blink = bool(on)
+        return DcpResult(
+            ok=True,
+            action="dcp_blink_on" if on else "dcp_blink_off",
+            target_mac=target_mac,
+            error=None,
+            latency_ms=1.0,
+        )
+    
     def factory_reset(self, *, target_mac: str) -> DcpResult:
         st = self._get(target_mac)
         st.ip = "0.0.0.0"
         st.mask = "0.0.0.0"
         st.gw = "0.0.0.0"
         st.name = "unnamed"
+        st.blink = False
         return DcpResult(ok=True, action="dcp_factory_reset", target_mac=target_mac, error=None, latency_ms=1.0)

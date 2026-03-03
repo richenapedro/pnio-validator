@@ -311,6 +311,21 @@ def _cmd_dcp_factory_reset(args: argparse.Namespace) -> int:
     print(json.dumps(res.to_dict(), indent=2, ensure_ascii=False) if args.json else res.to_dict())
     return 0 if res.ok else 2
 
+def _cmd_dcp_blink(args: argparse.Namespace) -> int:
+    iface = resolve_iface(args.iface, args.adapter)
+    client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
+    res = client.blink(
+        target_mac=args.mac,
+        on=bool(args.on),
+        duration_s=float(args.duration),
+        wait_response=not args.no_wait,
+    )
+    if args.json:
+        print(json.dumps(res.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        print(res.to_dict())
+    return 0 if res.ok else 2
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pnio-validator", description="PROFINET IO strict validation tool (WIP).")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -442,6 +457,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_dcp_reset.add_argument("--fake", action="store_true", help="Use fake DCP client (offline).")
     p_dcp_reset.add_argument("--json", action="store_true", help="Print as JSON.")
     p_dcp_reset.set_defaults(fn=_cmd_dcp_factory_reset)
+
+    p_dcp_blink = dcp_sub.add_parser("blink", help="Blink/identify device (best-effort; vendor-dependent).")
+    _add_target(p_dcp_blink)
+    p_dcp_blink.add_argument("--mac", required=True, help="Target device MAC address.")
+    p_dcp_blink.add_argument("--on", action="store_true", help="Turn blink ON.")
+    p_dcp_blink.add_argument("--off", dest="on", action="store_false", help="Turn blink OFF.")
+    p_dcp_blink.set_defaults(on=True)
+    p_dcp_blink.add_argument("--duration", type=float, default=10.0, help="Blink duration in seconds (hint).")
+    p_dcp_blink.add_argument("--timeout", type=float, default=3.0, help="Response wait timeout in seconds.")
+    p_dcp_blink.add_argument("--no-wait", action="store_true", help="Do not wait for a DCP response.")
+    p_dcp_blink.add_argument("--fake", action="store_true", help="Use fake DCP client (offline).")
+    p_dcp_blink.add_argument("--json", action="store_true", help="Print as JSON.")
+    p_dcp_blink.set_defaults(fn=_cmd_dcp_blink)
 
     return p
 
