@@ -318,11 +318,81 @@ def _cmd_match(args: argparse.Namespace) -> int:
     print(f"No match found. ({reason})")
     return 2
 
+def _resolve_target_mac(
+    *,
+    iface: str,
+    mac: str | None,
+    device_name: str | None,
+    ip: str | None,
+    timeout_s: float,
+    fake: bool,
+) -> str:
+    """
+    Resolve a target MAC address.
+
+    Priority:
+      1) explicit --mac
+      2) --device-name via DCP scan (or deterministic fake MAC in --fake)
+      3) --ip via DCP scan (or deterministic fake MAC in --fake)
+
+    In fake mode, we do NOT require network scan to succeed. We generate a stable,
+    deterministic MAC derived from the provided device_name/ip so the CLI can be used
+    offline (useful for front-end development).
+    """
+    if mac:
+        return mac
+
+    # Offline-friendly behavior for --fake
+    if fake:
+        seed = (device_name or ip or "").strip()
+        if not seed:
+            # Keep explicit error: user provided neither mac nor selectors
+            raise ValueError("Target not specified. Provide --mac or --device-name/--ip.")
+
+        # Deterministic "locally administered" unicast MAC: 02:xx:xx:xx:xx:xx
+        h = abs(hash(seed)) & 0xFFFFFFFFFFFF
+        b = [
+            0x02,  # locally administered, unicast
+            (h >> 32) & 0xFF,
+            (h >> 24) & 0xFF,
+            (h >> 16) & 0xFF,
+            (h >> 8) & 0xFF,
+            h & 0xFF,
+        ]
+        return ":".join(f"{x:02x}" for x in b)
+
+    devices = scan_dcp(iface=iface, timeout_s=timeout_s)
+
+    if device_name:
+        for d in devices:
+            if (d.name or "").lower() == device_name.lower():
+                return d.mac
+
+    if ip:
+        for d in devices:
+            if (d.ip or "") == ip:
+                return d.mac
+
+    raise ValueError("Target device not found. Provide --mac or use --device-name/--ip with a reachable device.")
 
 def _cmd_dcp_set_name(args: argparse.Namespace) -> int:
     iface = resolve_iface(args.iface, args.adapter)
     client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
-    res = client.set_name(target_mac=args.mac, name=args.name, wait_response=not args.no_wait)
+
+    try:
+        target_mac = _resolve_target_mac(
+            iface=iface,
+            mac=args.mac,
+            device_name=args.device_name,
+            ip=args.ip,
+            timeout_s=float(args.scan_timeout),
+            fake=bool(args.fake),
+        )
+    except ValueError as e:
+        print(str(e))
+        return 2
+
+    res = client.set_name(target_mac=target_mac, name=args.name, wait_response=not args.no_wait)
     _print_action_result(ok=res.ok, action=res.action, mac=res.target_mac, latency_ms=res.latency_ms, error=res.error, as_json=args.json)
     return 0 if res.ok else 2
 
@@ -330,9 +400,23 @@ def _cmd_dcp_set_name(args: argparse.Namespace) -> int:
 def _cmd_dcp_set_ip(args: argparse.Namespace) -> int:
     iface = resolve_iface(args.iface, args.adapter)
     client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
+
+    try:
+        target_mac = _resolve_target_mac(
+            iface=iface,
+            mac=args.mac,
+            device_name=args.device_name,
+            ip=args.ip,
+            timeout_s=float(args.scan_timeout),
+            fake=bool(args.fake),
+        )
+    except ValueError as e:
+        print(str(e))
+        return 2
+
     res = client.set_ip(
-        target_mac=args.mac,
-        ip=args.ip,
+        target_mac=target_mac,
+        ip=args.ipv4,
         mask=args.mask,
         gw=args.gw,
         wait_response=not args.no_wait,
@@ -344,16 +428,43 @@ def _cmd_dcp_set_ip(args: argparse.Namespace) -> int:
 def _cmd_dcp_factory_reset(args: argparse.Namespace) -> int:
     iface = resolve_iface(args.iface, args.adapter)
     client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
-    res = client.factory_reset(target_mac=args.mac)
+
+    try:
+        target_mac = _resolve_target_mac(
+            iface=iface,
+            mac=args.mac,
+            device_name=args.device_name,
+            ip=args.ip,
+            timeout_s=float(args.scan_timeout),
+            fake=bool(args.fake),
+        )
+    except ValueError as e:
+        print(str(e))
+        return 2
+
+    res = client.factory_reset(target_mac=target_mac)
     _print_action_result(ok=res.ok, action=res.action, mac=res.target_mac, latency_ms=res.latency_ms, error=res.error, as_json=args.json)
     return 0 if res.ok else 2
-
 
 def _cmd_dcp_blink(args: argparse.Namespace) -> int:
     iface = resolve_iface(args.iface, args.adapter)
     client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
+
+    try:
+        target_mac = _resolve_target_mac(
+            iface=iface,
+            mac=args.mac,
+            device_name=args.device_name,
+            ip=args.ip,
+            timeout_s=float(args.scan_timeout),
+            fake=bool(args.fake),
+        )
+    except ValueError as e:
+        print(str(e))
+        return 2
+
     res = client.blink(
-        target_mac=args.mac,
+        target_mac=target_mac,
         on=bool(args.on),
         duration_s=float(args.duration),
         wait_response=not args.no_wait,
@@ -461,7 +572,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_dcp_name = dcp_sub.add_parser("set-name", help="Set PROFINET NameOfStation via DCP.")
     _add_target(p_dcp_name)
-    p_dcp_name.add_argument("--mac", required=True, help="Target device MAC address.")
+    tg = p_dcp_name.add_mutually_exclusive_group(required=True)
+    tg.add_argument("--mac", help="Target device MAC address.")
+    tg.add_argument("--device-name", help="Target device station name (resolved via scan).")
+    tg.add_argument("--ip", help="Target device IPv4 (resolved via scan).")
+    p_dcp_name.add_argument("--scan-timeout", type=float, default=3.0, help="Scan timeout in seconds (for resolving device-name/ip).")
     p_dcp_name.add_argument("--name", required=True, help="New station name.")
     p_dcp_name.add_argument("--timeout", type=float, default=3.0, help="Response wait timeout in seconds.")
     p_dcp_name.add_argument("--no-wait", action="store_true", help="Do not wait for a DCP response.")
@@ -471,8 +586,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_dcp_ip = dcp_sub.add_parser("set-ip", help="Set IP/Mask/Gateway via DCP.")
     _add_target(p_dcp_ip)
-    p_dcp_ip.add_argument("--mac", required=True, help="Target device MAC address.")
-    p_dcp_ip.add_argument("--ip", required=True, help="IPv4 address.")
+    tg = p_dcp_ip.add_mutually_exclusive_group(required=True)
+    tg.add_argument("--mac", help="Target device MAC address.")
+    tg.add_argument("--device-name", help="Target device station name (resolved via scan).")
+    tg.add_argument("--ip", help="Target device IPv4 (resolved via scan).")
+    p_dcp_ip.add_argument("--scan-timeout", type=float, default=3.0, help="Scan timeout in seconds (for resolving device-name/ip).")
+
+    p_dcp_ip.add_argument("--ipv4", required=True, help="IPv4 address to set on the device.")
     p_dcp_ip.add_argument("--mask", required=True, help="IPv4 subnet mask.")
     p_dcp_ip.add_argument("--gw", default="0.0.0.0", help="IPv4 gateway.")
     p_dcp_ip.add_argument("--timeout", type=float, default=3.0, help="Response wait timeout in seconds.")
@@ -483,7 +603,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_dcp_reset = dcp_sub.add_parser("factory-reset", help="Factory reset (capability placeholder; vendor-specific).")
     _add_target(p_dcp_reset)
-    p_dcp_reset.add_argument("--mac", required=True, help="Target device MAC address.")
+    tg = p_dcp_reset.add_mutually_exclusive_group(required=True)
+    tg.add_argument("--mac", help="Target device MAC address.")
+    tg.add_argument("--device-name", help="Target device station name (resolved via scan).")
+    tg.add_argument("--ip", help="Target device IPv4 (resolved via scan).")
+    p_dcp_reset.add_argument("--scan-timeout", type=float, default=3.0, help="Scan timeout in seconds (for resolving device-name/ip).")
     p_dcp_reset.add_argument("--timeout", type=float, default=3.0, help="Response wait timeout in seconds.")
     p_dcp_reset.add_argument("--fake", action="store_true", help="Use fake DCP client (offline).")
     p_dcp_reset.add_argument("--json", action="store_true", help="Print as JSON.")
@@ -491,7 +615,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_dcp_blink = dcp_sub.add_parser("blink", help="Blink/identify device (best-effort; vendor-dependent).")
     _add_target(p_dcp_blink)
-    p_dcp_blink.add_argument("--mac", required=True, help="Target device MAC address.")
+    tg = p_dcp_blink.add_mutually_exclusive_group(required=True)
+    tg.add_argument("--mac", help="Target device MAC address.")
+    tg.add_argument("--device-name", help="Target device station name (resolved via scan).")
+    tg.add_argument("--ip", help="Target device IPv4 (resolved via scan).")
+    p_dcp_blink.add_argument("--scan-timeout", type=float, default=3.0, help="Scan timeout in seconds (for resolving device-name/ip).")
     p_dcp_blink.add_argument("--on", action="store_true", help="Turn blink ON.")
     p_dcp_blink.add_argument("--off", dest="on", action="store_false", help="Turn blink OFF.")
     p_dcp_blink.set_defaults(on=True)
