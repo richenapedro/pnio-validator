@@ -35,9 +35,23 @@ ApplicationWindow {
     property color cFocus: "#3aa0ff"
 
     color: cBg
-
+    function s(x) {
+        return (x === null || x === undefined) ? "" : String(x);
+    }
+    function i(x) {
+        return (x === null || x === undefined) ? -1 : Number(x);
+    }
     ListModel {
         id: adaptersLm
+    }
+    ListModel {
+        id: devicesLm
+    }   // itens: { name, mac, ip }
+    property int selectedDeviceIndex: -1
+    function selectedDevice() {
+        if (selectedDeviceIndex < 0 || selectedDeviceIndex >= devicesLm.count)
+            return null;
+        return devicesLm.get(selectedDeviceIndex);
     }
 
     property var adaptersModel: []
@@ -47,30 +61,37 @@ ApplicationWindow {
         logArea.text = txt;
         adaptersLm.clear();
         adaptersModel = [];
+
+        // Seed roles (cria roles mesmo se depois vier null)
+        adaptersLm.append({
+            friendly_name: "",
+            mac: "",
+            guid: "",
+            scapy_iface: "",
+            index: -1
+        });
+        adaptersLm.remove(0, 1);
         try {
             const obj = JSON.parse(txt);
             const arr = obj.adapters || [];
             adaptersModel = arr;
             for (let i = 0; i < arr.length; i++) {
-                adaptersLm.append(arr[i]);   // mantém fields: friendly_name, scapy_iface, etc.
-            }
-            adapterCombo.model = adaptersLm;
-            adapterCombo.textRole = "friendly_name";
-            if (adaptersLm.count > 0) {
-                adapterCombo.currentIndex = 0;
-            } else {
-                adapterCombo.currentIndex = -1;
+                const a = arr[i] || {};
+                // garante roles sempre com string (nunca null)
+                adaptersLm.append({
+                    friendly_name: s(a.friendly_name),
+                    mac: s(a.mac),
+                    guid: s(a.guid),
+                    scapy_iface: s(a.scapy_iface),
+                    index: i(a.index)
+                });
             }
         } catch (e) {
-            // se o JSON quebrar, você vai ver isso no output
             logArea.text = "ERROR parsing adapters JSON: " + e + "\n\nRaw:\n" + txt;
-            adapterCombo.model = adaptersLm;
-            adapterCombo.currentIndex = -1;
         }
     }
 
     Component.onCompleted: refreshAdapters()
-
     // ---- Components ----
     component PillButton: Button {
         id: control
@@ -205,36 +226,53 @@ ApplicationWindow {
             spacing: 12
 
             // Top bar
+            // Top bar
             Rectangle {
                 Layout.fillWidth: true
-                height: 54
+                height: 56
                 radius: 14
                 color: cTop
                 border.color: cBorder
                 border.width: 1
+                clip: true
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.margins: 14
-                    spacing: 10
+                    anchors.leftMargin: 16
+                    anchors.rightMargin: 16
+                    anchors.topMargin: 10
+                    anchors.bottomMargin: 10
+                    spacing: 12
 
-                    Label {
-                        text: "PNIO-Validator"
-                        font.pixelSize: 16
-                        font.weight: Font.Bold
-                        color: cText
-                    }
+                    // Left: title + badge
+                    RowLayout {
+                        Layout.alignment: Qt.AlignVCenter
+                        spacing: 10
 
-                    Label {
-                        text: "MVP"
-                        font.pixelSize: 11
-                        color: cMuted
-                        padding: 6
-                        background: Rectangle {
+                        Label {
+                            text: "PNIO-Validator"
+                            font.pixelSize: 16
+                            font.weight: Font.Bold
+                            color: cText
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        Rectangle {
                             radius: 8
                             color: cBg
                             border.color: cFieldBd
                             border.width: 1
+                            implicitHeight: 22
+                            implicitWidth: badgeText.implicitWidth + 14
+
+                            Text {
+                                id: badgeText
+                                anchors.centerIn: parent
+                                text: "MVP"
+                                font.pixelSize: 11
+                                color: cMuted
+                                font.weight: Font.DemiBold
+                            }
                         }
                     }
 
@@ -242,21 +280,34 @@ ApplicationWindow {
                         Layout.fillWidth: true
                     }
 
-                    Label {
-                        text: darkMode ? "Dark" : "Light"
-                        color: cMuted
-                        font.pixelSize: 11
-                    }
+                    // Right: theme + button (grouped)
+                    RowLayout {
+                        Layout.alignment: Qt.AlignVCenter
+                        spacing: 10
 
-                    Switch {
-                        id: themeSwitch
-                        checked: true
-                        onToggled: win.darkMode = checked
-                    }
+                        Label {
+                            text: darkMode ? "Dark" : "Light"
+                            color: cMuted
+                            font.pixelSize: 11
+                            verticalAlignment: Text.AlignVCenter
+                        }
 
-                    PillButton {
-                        text: "Reload adapters"
-                        onClicked: refreshAdapters()
+                        Switch {
+                            id: themeSwitch
+                            Layout.alignment: Qt.AlignVCenter
+                            checked: true
+                            implicitHeight: 28
+                            implicitWidth: 52
+                            onToggled: win.darkMode = checked
+                        }
+
+                        PillButton {
+                            text: "Reload adapters"
+                            Layout.alignment: Qt.AlignVCenter
+                            implicitHeight: 34
+                            implicitWidth: 160
+                            onClicked: refreshAdapters()
+                        }
                     }
                 }
             }
@@ -282,11 +333,23 @@ ApplicationWindow {
                         onClicked: logArea.text = ""
                     }
                 }
-
-                ScrollView {
+                Flickable {
+                    id: logFlick
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
+
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                    }
+                    ScrollBar.horizontal: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                    }
+
+                    // área "visível" do flick
+                    contentWidth: Math.max(width, logArea.implicitWidth)
+                    contentHeight: Math.max(height, logArea.implicitHeight)
 
                     TextArea {
                         id: logArea
@@ -297,12 +360,26 @@ ApplicationWindow {
                         color: cText
                         selectionColor: cFocus
                         selectedTextColor: darkMode ? "#0b0f15" : "#ffffff"
+
+                        // importante: o TextArea precisa ter tamanho real dentro do Flickable
+                        x: 0
+                        y: 0
+                        width: Math.max(logFlick.width, implicitWidth)
+                        height: Math.max(logFlick.height, implicitHeight)
+
+                        // padding pra não colar nas bordas
+                        leftPadding: 10
+                        rightPadding: 10
+                        topPadding: 8
+                        bottomPadding: 8
+
                         background: Rectangle {
                             radius: 12
                             color: cBg
                             border.color: cFieldBd
                             border.width: 1
                         }
+
                         text: ""
                     }
                 }
@@ -328,11 +405,52 @@ ApplicationWindow {
 
                 ComboBox {
                     id: adapterCombo
+
+                    // força tamanho real (Layout às vezes ignora preferred)
                     Layout.preferredWidth: 280
-                    height: 100
+                    Layout.minimumWidth: 280
+                    Layout.maximumWidth: 280
+                    implicitWidth: 280
+                    width: 280
+
+                    // altura: use implicitHeight (Controls2 respeita melhor)
+                    implicitHeight: 34
+                    height: 34
+
                     font.pixelSize: 12
                     model: adaptersLm
                     textRole: "friendly_name"
+
+                    contentItem: Text {
+                        text: adapterCombo.displayText
+                        color: cText
+                        font.pixelSize: 12
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                        leftPadding: 12
+                        rightPadding: 28   // espaço da seta
+                    }
+
+                    indicator: Canvas {
+                        id: arrow
+                        width: 24
+                        height: 24
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        onPaint: {
+                            var ctx = getContext("2d");
+                            ctx.clearRect(0, 0, width, height);
+                            ctx.fillStyle = win.cMuted;
+                            ctx.beginPath();
+                            ctx.moveTo(6, 9);
+                            ctx.lineTo(18, 9);
+                            ctx.lineTo(12, 15);
+                            ctx.closePath();
+                            ctx.fill();
+                        }
+                    }
+
                     background: Rectangle {
                         radius: 10
                         color: cFieldBg
@@ -382,6 +500,25 @@ ApplicationWindow {
                             const a = adaptersModel[adapterCombo.currentIndex];
                             const txt = backend.scan(a.scapy_iface, scanTimeout.value, matchGsd.checked);
                             logArea.text = txt;
+
+                            // update devices model for GUI
+                            devicesLm.clear();
+                            selectedDeviceIndex = -1;
+                            try {
+                                const obj = JSON.parse(txt);
+                                const devs = obj.devices || obj.found || obj.results || [];   // aceita nomes diferentes
+                                for (let i = 0; i < devs.length; i++) {
+                                    devicesLm.append({
+                                        name: (devs[i].name || devs[i].station_name || ""),
+                                        mac: (devs[i].mac || devs[i].mac_addr || ""),
+                                        ip: (devs[i].ip || devs[i].ip_addr || "")
+                                    });
+                                }
+                                if (devicesLm.count > 0)
+                                    selectedDeviceIndex = 0;
+                            } catch (e)
+                            // não quebra UI se JSON mudar
+                            {}
                         }
                     }
                 }
@@ -423,26 +560,18 @@ ApplicationWindow {
                     text: ""
                     Layout.fillWidth: true
                 }
-
-                Rectangle {
-                    Layout.preferredWidth: 150
-                    Layout.minimumWidth: 150
+                Item {
+                    Layout.preferredWidth: 160
+                    Layout.minimumWidth: 160
+                    Layout.maximumWidth: 160
+                    Layout.alignment: Qt.AlignRight
+                    Layout.rightMargin: 6
                     height: 34
-                    radius: 10
-                    color: "transparent"
-                    Item {
-                        Layout.preferredWidth: 160
-                        Layout.minimumWidth: 160
-                        Layout.maximumWidth: 160
-                        Layout.alignment: Qt.AlignRight
-                        Layout.rightMargin: 6
-                        height: 34
 
-                        PillButton {
-                            anchors.fill: parent
-                            text: "Match"
-                            onClicked: logArea.text = backend.match(vendorId.text, deviceId.text, nameHint.text)
-                        }
+                    PillButton {
+                        anchors.fill: parent
+                        text: "Match"
+                        onClicked: logArea.text = backend.matchGui(vendorId.text, deviceId.text, nameHint.text)
                     }
                 }
             }
@@ -451,35 +580,34 @@ ApplicationWindow {
 
     Component {
         id: validateCard
-        CardFrame {
-            title: "Validate / DCP (Fake)"
 
+        CardFrame {
+            title: "Validate / DCP"
+
+            // -----------------------------
+            // Line 1: Target + MAC
+            // -----------------------------
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
 
                 Label {
-                    text: "Device"
+                    text: "Target"
                     color: cMuted
                     font.pixelSize: 11
-                }
-                Field {
-                    id: devName
-                    text: "em31-new"
-                    Layout.fillWidth: true
                 }
 
-                Label {
-                    text: "Scenario"
-                    color: cMuted
-                    font.pixelSize: 11
-                }
                 ComboBox {
-                    id: scenario
-                    Layout.preferredWidth: 170
+                    id: deviceCombo
+                    Layout.fillWidth: true
+                    model: devicesLm
+                    textRole: "name"
+                    currentIndex: selectedDeviceIndex
+                    onCurrentIndexChanged: selectedDeviceIndex = currentIndex
+
+                    implicitHeight: 34
                     height: 34
-                    font.pixelSize: 12
-                    model: ["ok", "f841_timeout", "aff0_timeout", "f841_short", "random_latency"]
+
                     background: Rectangle {
                         radius: 10
                         color: cFieldBg
@@ -488,20 +616,103 @@ ApplicationWindow {
                     }
                 }
 
-                Rectangle {
+                Label {
+                    text: "MAC"
+                    color: cMuted
+                    font.pixelSize: 11
+                }
+
+                Field {
+                    text: selectedDevice() ? selectedDevice().mac : ""
+                    readOnly: true
+                    Layout.preferredWidth: 210
+                }
+            }
+
+            // -----------------------------
+            // Line 2: Scenario + Validate
+            // (removido "Device/devName" pra não “colar” texto e não ter lixo visual)
+            // -----------------------------
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+
+                Label {
+                    text: "Scenario"
+                    color: cMuted
+                    font.pixelSize: 11
+                }
+
+                ComboBox {
+                    id: scenario
+
+                    Layout.fillWidth: true
+                    implicitHeight: 34
+                    height: 34
+
+                    font.pixelSize: 12
+                    model: ["ok", "f841_timeout", "aff0_timeout", "f841_short", "random_latency"]
+
+                    // mantém o estilo de texto/arrow consistente
+                    contentItem: Text {
+                        text: scenario.displayText
+                        color: cText
+                        font.pixelSize: 12
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                        leftPadding: 12
+                        rightPadding: 28
+                    }
+
+                    indicator: Canvas {
+                        width: 24
+                        height: 24
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        onPaint: {
+                            var ctx = getContext("2d");
+                            ctx.clearRect(0, 0, width, height);
+                            ctx.fillStyle = win.cMuted;
+                            ctx.beginPath();
+                            ctx.moveTo(6, 9);
+                            ctx.lineTo(18, 9);
+                            ctx.lineTo(12, 15);
+                            ctx.closePath();
+                            ctx.fill();
+                        }
+                    }
+
+                    background: Rectangle {
+                        radius: 10
+                        color: cFieldBg
+                        border.color: cFieldBd
+                        border.width: 1
+                    }
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                Item {
                     Layout.preferredWidth: 150
                     Layout.minimumWidth: 150
+                    Layout.maximumWidth: 150
                     height: 34
-                    radius: 10
-                    color: "transparent"
+
                     PillButton {
                         anchors.fill: parent
                         text: "Validate"
-                        onClicked: logArea.text = backend.validateFake(devName.text, scenario.currentText)
+                        // por enquanto segue fake (até ligar validate real)
+                        onClicked: logArea.text = backend.validateFake((selectedDevice() ? selectedDevice().name : ""), scenario.currentText)
                     }
                 }
             }
 
+            // -----------------------------
+            // Line 3: SetName
+            // -----------------------------
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
@@ -511,22 +722,31 @@ ApplicationWindow {
                     color: cMuted
                     font.pixelSize: 11
                 }
+
                 Field {
                     id: newStation
                     text: "foo"
-                    Layout.preferredWidth: 140
+                    Layout.preferredWidth: 220
                 }
 
-                Rectangle {
+                Item {
                     Layout.preferredWidth: 150
                     Layout.minimumWidth: 150
+                    Layout.maximumWidth: 150
                     height: 34
-                    radius: 10
-                    color: "transparent"
+
                     PillButton {
                         anchors.fill: parent
                         text: "SetName"
-                        onClicked: logArea.text = backend.dcpSetNameFake(devName.text, newStation.text)
+                        onClicked: {
+                            if (adapterCombo.currentIndex < 0)
+                                return;
+                            const a = adaptersModel[adapterCombo.currentIndex];
+                            const d = selectedDevice();
+                            if (!d || !d.mac)
+                                return;
+                            logArea.text = backend.dcpSetName(a.scapy_iface, d.mac, newStation.text);
+                        }
                     }
                 }
 
@@ -535,6 +755,9 @@ ApplicationWindow {
                 }
             }
 
+            // -----------------------------
+            // Line 4: SetIP (wrap-friendly)
+            // -----------------------------
             Flow {
                 Layout.fillWidth: true
                 spacing: 10
@@ -552,6 +775,7 @@ ApplicationWindow {
                         Layout.preferredWidth: 170
                     }
                 }
+
                 RowLayout {
                     spacing: 10
                     Label {
@@ -565,6 +789,7 @@ ApplicationWindow {
                         Layout.preferredWidth: 170
                     }
                 }
+
                 RowLayout {
                     spacing: 10
                     Label {
@@ -579,44 +804,66 @@ ApplicationWindow {
                     }
                 }
 
-                Rectangle {
+                Item {
                     width: 150
                     height: 34
-                    radius: 10
-                    color: "transparent"
+
                     PillButton {
                         anchors.fill: parent
                         text: "SetIP"
-                        onClicked: logArea.text = backend.dcpSetIpFake(devName.text, ip.text, mask.text, gw.text)
+                        onClicked: {
+                            if (adapterCombo.currentIndex < 0)
+                                return;
+                            const a = adaptersModel[adapterCombo.currentIndex];
+                            const d = selectedDevice();
+                            if (!d || !d.mac)
+                                return;
+                            logArea.text = backend.dcpSetIp(a.scapy_iface, d.mac, ip.text, mask.text, gw.text);
+                        }
                     }
                 }
             }
 
-            // Botões finais: todos dentro de boxes (sem empurrar pra fora)
+            // -----------------------------
+            // Line 5: Blink + Factory Reset
+            // -----------------------------
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
 
-                Rectangle {
+                Item {
                     width: 150
                     height: 34
-                    radius: 10
-                    color: "transparent"
                     PillButton {
                         anchors.fill: parent
                         text: "Blink ON"
-                        onClicked: logArea.text = backend.dcpBlinkFake(devName.text, true, 10.0)
+                        onClicked: {
+                            if (adapterCombo.currentIndex < 0)
+                                return;
+                            const a = adaptersModel[adapterCombo.currentIndex];
+                            const d = selectedDevice();
+                            if (!d || !d.mac)
+                                return;
+                            logArea.text = backend.dcpBlink(a.scapy_iface, d.mac, true, 10.0);
+                        }
                     }
                 }
-                Rectangle {
+
+                Item {
                     width: 150
                     height: 34
-                    radius: 10
-                    color: "transparent"
                     PillButton {
                         anchors.fill: parent
                         text: "Blink OFF"
-                        onClicked: logArea.text = backend.dcpBlinkFake(devName.text, false, 10.0)
+                        onClicked: {
+                            if (adapterCombo.currentIndex < 0)
+                                return;
+                            const a = adaptersModel[adapterCombo.currentIndex];
+                            const d = selectedDevice();
+                            if (!d || !d.mac)
+                                return;
+                            logArea.text = backend.dcpBlink(a.scapy_iface, d.mac, false, 10.0);
+                        }
                     }
                 }
 
@@ -624,15 +871,21 @@ ApplicationWindow {
                     Layout.fillWidth: true
                 }
 
-                Rectangle {
+                Item {
                     width: 170
                     height: 34
-                    radius: 10
-                    color: "transparent"
                     PillButton {
                         anchors.fill: parent
                         text: "Factory Reset"
-                        onClicked: logArea.text = backend.dcpFactoryResetFake(devName.text)
+                        onClicked: {
+                            if (adapterCombo.currentIndex < 0)
+                                return;
+                            const a = adaptersModel[adapterCombo.currentIndex];
+                            const d = selectedDevice();
+                            if (!d || !d.mac)
+                                return;
+                            logArea.text = backend.dcpFactoryReset(a.scapy_iface, d.mac);
+                        }
                     }
                 }
             }
