@@ -2,9 +2,11 @@ README.md
 pyproject.toml
 src/pnio_validator/__init__.py
 src/pnio_validator/adapters.py
+src/pnio_validator/app_service.py
 src/pnio_validator/cli.py
 src/pnio_validator/dcp.py
 src/pnio_validator/dcp_fake.py
+src/pnio_validator/device_model.py
 src/pnio_validator/gsdml_parser.py
 src/pnio_validator/models.py
 src/pnio_validator/pnio_client.py
@@ -20,8 +22,11 @@ src/pnio_validator.egg-info/dependency_links.txt
 src/pnio_validator.egg-info/entry_points.txt
 src/pnio_validator.egg-info/requires.txt
 src/pnio_validator.egg-info/top_level.txt
+src/pnio_validator/util/__init__.py
+src/pnio_validator/util/mac.py
 tests/test_cli_match.py
 tests/test_dcp_fake.py
+tests/test_fake_mac.py
 tests/test_gsdml_parser.py
 tests/test_gsdml_summarize.py
 tests/test_registry.py

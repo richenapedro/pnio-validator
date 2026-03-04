@@ -17,7 +17,33 @@ from .report import ReportMeta, write_report_json, write_report_pdf
 from .scanner import scan_dcp
 from .suite import SuiteRunConfig, run_fake_suite
 from .validator import HeidenhainStrictValidator, RealPnioClientAdapter, ValidationConfig
+from .util.mac import deterministic_fake_mac
+from .app_service import AppService
 
+
+def _build_service() -> AppService:
+    """Create the service facade (keeps CLI as thin wrapper)."""
+    import pnio_validator.adapters as adapters
+    import pnio_validator.scanner as scanner
+    import pnio_validator.registry as registry
+    import pnio_validator.validator as validator
+    from pnio_validator.dcp import DcpClient
+    from pnio_validator.dcp_fake import FakeDcpClient
+
+    return AppService(
+        adapters=adapters,
+        scanner=scanner,
+        registry=registry,
+        validator=validator,
+        dcp_real=DcpClient,
+        dcp_fake=FakeDcpClient,
+    )
+
+def parse_int(v: str) -> int:
+    """Parse decimal or hex string (e.g. '4660' or '0x1234')."""
+    s = str(v).strip().lower()
+    base = 16 if s.startswith("0x") else 10
+    return int(s, base)
 
 def _print_result_dict(payload: dict, *, as_json: bool) -> None:
     if as_json:
@@ -48,9 +74,10 @@ def _print_action_result(*, ok: bool, action: str, mac: str, latency_ms: float |
 
 
 def _cmd_adapters(args: argparse.Namespace) -> int:
-    adapters = list_adapters()
+    service = _build_service()
+    adapters = service.list_adapters()
     if args.json:
-        print(json.dumps([a.to_dict() for a in adapters], indent=2, ensure_ascii=False))
+        print(json.dumps(adapters, indent=2, ensure_ascii=False))
         return 0
 
     if not adapters:
@@ -58,55 +85,44 @@ def _cmd_adapters(args: argparse.Namespace) -> int:
         return 0
 
     for a in adapters:
-        mac = a.mac or "-"
-        status = a.status or "-"
-        print(f"{a.index}) {a.friendly_name}  mac={mac}  status={status}  iface={a.scapy_iface}")
+        mac = a.get('mac') or '-'
+        status = a.get('status') or '-'
+        print(f"{a.get('index')}) {a.get('friendly_name')}  mac={mac}  status={status}  iface={a.get('scapy_iface')}")
     return 0
 
 
 def _cmd_scan(args: argparse.Namespace) -> int:
     iface = resolve_iface(args.iface, args.adapter)
-    devices = scan_dcp(iface=iface, timeout_s=args.timeout)
+    service = _build_service()
+    devices = service.scan_devices(iface=iface, timeout_s=args.timeout, match_gsd=args.match_gsd)
 
     if args.match_gsd:
-        matched: list[dict] = []
-        for d in devices:
-            entry, reason, score = match_device_to_gsd(
-                vendor_id=d.vendor_id,
-                device_id=d.device_id,
-                name=d.name,
-            )
-            md = d.to_dict()
-            md["gsd_match"] = None if entry is None else entry.to_dict()
-            md["gsd_match_reason"] = reason
-            md["gsd_match_score"] = score
-            matched.append(md)
-
+        payload = [d.to_dict() for d in devices]
         if args.json:
-            print(json.dumps(matched, indent=2, ensure_ascii=False))
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
             return 0
 
-        if not matched:
+        if not payload:
             print("No devices found.")
             return 0
 
-        for md in matched:
+        for md in payload:
             dname = md.get("name") or "<no-name>"
             ip = md.get("ip") or "-"
             mac = md.get("mac")
             vid = md.get("vendor_id")
             did = md.get("device_id")
 
-            g = md["gsd_match"]
+            g = md.get("gsd_match")
             if g:
                 print(
                     f"- {dname}  ip={ip}  mac={mac}  vendor={vid}  device={did}  "
-                    f"-> GSD={Path(g['file']).name} ({md['gsd_match_reason']}, score={md['gsd_match_score']})"
+                    f"-> GSD={Path(g['file']).name} ({md.get('gsd_match_reason')}, score={md.get('gsd_match_score')})"
                 )
             else:
                 print(
                     f"- {dname}  ip={ip}  mac={mac}  vendor={vid}  device={did}  "
-                    f"-> GSD=<none> ({md['gsd_match_reason']})"
+                    f"-> GSD=<none> ({md.get('gsd_match_reason')})"
                 )
         return 0
 
@@ -126,60 +142,18 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         )
     return 0
 
-
 def _cmd_validate(args: argparse.Namespace) -> int:
     if not args.fake and not (args.iface or args.adapter is not None):
         print("Please provide --iface or --adapter (or use --fake).")
         return 2
 
-    iface = None if args.fake else resolve_iface(args.iface, args.adapter)
-
-    # Select client implementation (fake for local development, real for network usage)
-    if args.fake:
-        client = FakePnioClient(
-            FakeScenario(
-                name=args.scenario,
-                base_latency_ms=float(args.base_latency_ms),
-                extra_latency_ms=float(args.extra_latency_ms),
-            )
-        )
-    else:
-        real = PnioClient(PnioClientConfig(iface=str(iface), timeout_ms=args.timeout_ms))
-        client = RealPnioClientAdapter(real)
-
-    vcfg = ValidationConfig(
-        device_name=args.device_name,
-        slot=args.slot,
-        subslot=args.subslot,
-        read_len_aff0=args.len_aff0,
-        read_len_f841=args.len_f841,
-        retries=args.retries,
-        timeout_ms=args.timeout_ms,
-        min_aff0_bytes=args.min_aff0_bytes,
-        min_f841_ratio=args.min_f841_ratio,
-    )
-    validator = HeidenhainStrictValidator(client=client, config=vcfg)
-    result = validator.run()
+    service = _build_service()
+    result, meta = service.validate_device(args)
 
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
     else:
         print(result.to_text())
-
-    meta = ReportMeta(
-        generated_at=datetime.now().isoformat(timespec="seconds"),
-        mode="fake" if args.fake else "real",
-        scenario=args.scenario if args.fake else None,
-        iface=str(iface) if iface else None,
-        adapter=args.adapter,
-        device_name=args.device_name,
-        timeout_ms=args.timeout_ms,
-        retries=args.retries,
-        len_aff0=args.len_aff0,
-        len_f841=args.len_f841,
-        min_aff0_bytes=args.min_aff0_bytes,
-        min_f841_ratio=args.min_f841_ratio,
-    )
 
     if args.out:
         out = Path(args.out)
@@ -194,8 +168,6 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         print(f"PDF report written: {pdf}")
 
     return 0 if result.ok else 2
-
-
 def _cmd_suite(args: argparse.Namespace) -> int:
     # Suite currently supports fake mode only
     if not args.fake:
@@ -287,35 +259,23 @@ def _cmd_gsdml_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_match(args: argparse.Namespace) -> int:
-    vendor_id = int(str(args.vendor_id), 0)
-    device_id = int(str(args.device_id), 0)
+    service = _build_service()
 
-    entry, reason, score = match_device_to_gsd(
-        vendor_id=vendor_id,
-        device_id=device_id,
-        name=args.name or "",
-    )
+    vendor_id = parse_int(args.vendor_id)
+    device_id = parse_int(args.device_id)
+
+    res = service.match(vendor_id=vendor_id, device_id=device_id, name=args.name or "")
 
     if args.json:
-        payload = {
-            "vendor_id": f"0x{vendor_id:x}",
-            "device_id": f"0x{device_id:x}",
-            "name": args.name,
-            "match": None if entry is None else entry.to_dict(),
-            "reason": reason,
-            "score": score,
-        }
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-        return 0 if entry else 2
-
-    if entry:
-        print(f"Match: {Path(entry.file).name}  ({reason}, score={score})")
-        print(f"Vendor/Device: {entry.vendor_id}:{entry.device_id}")
-        if entry.product_name:
-            print(f"Product: {entry.product_name}")
+        print(json.dumps(res, indent=2, ensure_ascii=False))
         return 0
 
-    print(f"No match found. ({reason})")
+    g = res.get("gsd_match")
+    if g:
+        print(f"Match: {Path(g['file']).name} ({res.get('gsd_match_reason')}, score={res.get('gsd_match_score')})")
+        return 0
+
+    print(f"Match: <none> ({res.get('gsd_match_reason')})")
     return 2
 
 def _resolve_target_mac(
@@ -349,17 +309,7 @@ def _resolve_target_mac(
             # Keep explicit error: user provided neither mac nor selectors
             raise ValueError("Target not specified. Provide --mac or --device-name/--ip.")
 
-        # Deterministic "locally administered" unicast MAC: 02:xx:xx:xx:xx:xx
-        h = abs(hash(seed)) & 0xFFFFFFFFFFFF
-        b = [
-            0x02,  # locally administered, unicast
-            (h >> 32) & 0xFF,
-            (h >> 24) & 0xFF,
-            (h >> 16) & 0xFF,
-            (h >> 8) & 0xFF,
-            h & 0xFF,
-        ]
-        return ":".join(f"{x:02x}" for x in b)
+        return deterministic_fake_mac(seed)
 
     devices = scan_dcp(iface=iface, timeout_s=timeout_s)
 
@@ -376,103 +326,92 @@ def _resolve_target_mac(
     raise ValueError("Target device not found. Provide --mac or use --device-name/--ip with a reachable device.")
 
 def _cmd_dcp_set_name(args: argparse.Namespace) -> int:
-    iface = resolve_iface(args.iface, args.adapter)
-    client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
+    if not args.fake and not (args.iface or args.adapter):
+        raise SystemExit("one of the arguments --iface --adapter is required (unless --fake)")
+
+    service = _build_service()
 
     try:
-        target_mac = _resolve_target_mac(
-            iface=iface,
-            mac=args.mac,
-            device_name=args.device_name,
-            ip=args.ip,
-            timeout_s=float(args.scan_timeout),
-            fake=bool(args.fake),
-        )
+        res = service.dcp_set_name(args)
     except ValueError as e:
         print(str(e))
         return 2
 
-    res = client.set_name(target_mac=target_mac, name=args.name, wait_response=not args.no_wait)
-    _print_action_result(ok=res.ok, action=res.action, mac=res.target_mac, latency_ms=res.latency_ms, error=res.error, as_json=args.json)
+    _print_action_result(
+        ok=res.ok,
+        action=res.action,
+        mac=res.target_mac,
+        latency_ms=res.latency_ms,
+        error=res.error,
+        as_json=args.json,
+    )
     return 0 if res.ok else 2
-
 
 def _cmd_dcp_set_ip(args: argparse.Namespace) -> int:
-    iface = resolve_iface(args.iface, args.adapter)
-    client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
+    if not args.fake and not (args.iface or args.adapter):
+        raise SystemExit("one of the arguments --iface --adapter is required (unless --fake)")
+
+    service = _build_service()
 
     try:
-        target_mac = _resolve_target_mac(
-            iface=iface,
-            mac=args.mac,
-            device_name=args.device_name,
-            ip=args.ip,
-            timeout_s=float(args.scan_timeout),
-            fake=bool(args.fake),
-        )
+        res = service.dcp_set_ip(args)
     except ValueError as e:
         print(str(e))
         return 2
 
-    res = client.set_ip(
-        target_mac=target_mac,
-        ip=args.ipv4,
-        mask=args.mask,
-        gw=args.gw,
-        wait_response=not args.no_wait,
+    _print_action_result(
+        ok=res.ok,
+        action=res.action,
+        mac=res.target_mac,
+        latency_ms=res.latency_ms,
+        error=res.error,
+        as_json=args.json,
     )
-    _print_action_result(ok=res.ok, action=res.action, mac=res.target_mac, latency_ms=res.latency_ms, error=res.error, as_json=args.json)
     return 0 if res.ok else 2
 
-
 def _cmd_dcp_factory_reset(args: argparse.Namespace) -> int:
-    iface = resolve_iface(args.iface, args.adapter)
-    client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
+    if not args.fake and not (args.iface or args.adapter):
+        raise SystemExit("one of the arguments --iface --adapter is required (unless --fake)")
+
+    service = _build_service()
 
     try:
-        target_mac = _resolve_target_mac(
-            iface=iface,
-            mac=args.mac,
-            device_name=args.device_name,
-            ip=args.ip,
-            timeout_s=float(args.scan_timeout),
-            fake=bool(args.fake),
-        )
+        res = service.dcp_factory_reset(args)
     except ValueError as e:
         print(str(e))
         return 2
 
-    res = client.factory_reset(target_mac=target_mac)
-    _print_action_result(ok=res.ok, action=res.action, mac=res.target_mac, latency_ms=res.latency_ms, error=res.error, as_json=args.json)
+    _print_action_result(
+        ok=res.ok,
+        action=res.action,
+        mac=res.target_mac,
+        latency_ms=res.latency_ms,
+        error=res.error,
+        as_json=args.json,
+    )
     return 0 if res.ok else 2
 
 def _cmd_dcp_blink(args: argparse.Namespace) -> int:
-    iface = resolve_iface(args.iface, args.adapter)
-    client = FakeDcpClient() if args.fake else DcpClient(iface=iface, timeout_s=float(args.timeout))
+    if not args.fake and not (args.iface or args.adapter):
+        raise SystemExit("one of the arguments --iface --adapter is required (unless --fake)")
+
+    service = _build_service()
 
     try:
-        target_mac = _resolve_target_mac(
-            iface=iface,
-            mac=args.mac,
-            device_name=args.device_name,
-            ip=args.ip,
-            timeout_s=float(args.scan_timeout),
-            fake=bool(args.fake),
-        )
+        res = service.dcp_blink(args)
     except ValueError as e:
         print(str(e))
         return 2
 
-    res = client.blink(
-        target_mac=target_mac,
-        on=bool(args.on),
-        duration_s=float(args.duration),
-        wait_response=not args.no_wait,
+    _print_action_result(
+        ok=res.ok,
+        action=res.action,
+        mac=res.target_mac,
+        latency_ms=res.latency_ms,
+        error=res.error,
+        as_json=args.json,
     )
-    _print_action_result(ok=res.ok, action=res.action, mac=res.target_mac, latency_ms=res.latency_ms, error=res.error, as_json=args.json)
     return 0 if res.ok else 2
-
-
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pnio-validator", description="PROFINET IO strict validation tool (WIP).")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -566,10 +505,12 @@ def build_parser() -> argparse.ArgumentParser:
     dcp_sub = p_dcp.add_subparsers(dest="dcp_cmd", required=True)
 
     def _add_target(parser_: argparse.ArgumentParser) -> None:
-        mg = parser_.add_mutually_exclusive_group(required=True)
+    # NOTE: iface/adapter becomes conditionally required:
+    # - required when NOT in --fake mode
+    # - optional in --fake mode (offline)
+        mg = parser_.add_mutually_exclusive_group(required=False)
         mg.add_argument("--iface", help="Scapy/Npcap interface name (e.g. \\\\Device\\\\NPF_{GUID}).")
         mg.add_argument("--adapter", type=int, help="Adapter index from `pnio-validator adapters`.")
-
     p_dcp_name = dcp_sub.add_parser("set-name", help="Set PROFINET NameOfStation via DCP.")
     _add_target(p_dcp_name)
     tg = p_dcp_name.add_mutually_exclusive_group(required=True)
