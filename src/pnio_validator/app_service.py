@@ -262,3 +262,23 @@ class AppService:
         )
 
         return result, meta
+    
+    def validate_payload(self, args: Any) -> Dict[str, Any]:
+        """GUI-friendly validation call.
+
+        Returns a single JSON-serializable dict:
+        { "result": <validator result dict>, "meta": <report meta dict> }
+        """
+        result, meta = self.validate_device(args)
+
+        # result has to_dict(); meta may be dataclass-like or already dict
+        result_d = result.to_dict() if hasattr(result, "to_dict") else result
+
+        if hasattr(meta, "to_dict") and callable(meta.to_dict):
+            meta_d = meta.to_dict()
+        elif isinstance(meta, dict):
+            meta_d = meta
+        else:
+            meta_d = meta.__dict__ if hasattr(meta, "__dict__") else {"repr": repr(meta)}
+
+        return {"result": result_d, "meta": meta_d}

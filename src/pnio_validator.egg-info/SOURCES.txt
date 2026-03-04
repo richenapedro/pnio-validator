@@ -8,9 +8,11 @@ src/pnio_validator/dcp.py
 src/pnio_validator/dcp_fake.py
 src/pnio_validator/device_model.py
 src/pnio_validator/gsdml_parser.py
+src/pnio_validator/main_qt.py
 src/pnio_validator/models.py
 src/pnio_validator/pnio_client.py
 src/pnio_validator/pnio_client_fake.py
+src/pnio_validator/qt_backend.py
 src/pnio_validator/registry.py
 src/pnio_validator/report.py
 src/pnio_validator/scanner.py
