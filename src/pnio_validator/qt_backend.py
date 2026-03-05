@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 from types import SimpleNamespace
-from PySide6.QtCore import QObject, Slot
+
+from PySide6.QtCore import QObject, Slot, Signal, QThread
 
 from .cli import _build_service  # keep single source of wiring
 from .app_service import AppService
@@ -13,15 +14,56 @@ def _json_dumps(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2)
 
 
+class _ScanWorker(QObject):
+    finished = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, service: AppService, iface: str, timeout_s: float, match_gsd: bool):
+        super().__init__()
+        self._service = service
+        self._iface = str(iface)
+        self._timeout_s = float(timeout_s)
+        self._match_gsd = bool(match_gsd)
+
+    @Slot()
+    def run(self):
+        try:
+            devices = self._service.scan_devices(
+                iface=self._iface,
+                timeout_s=self._timeout_s,
+                match_gsd=self._match_gsd,
+            )
+            txt = json.dumps(
+                {"ok": True, "devices": [d.to_dict() for d in devices]},
+                ensure_ascii=False,
+                indent=2,
+            )
+            self.finished.emit(txt)
+        except Exception as e:
+            txt = json.dumps(
+                {"ok": False, "error": "scan_failed", "details": str(e)},
+                ensure_ascii=False,
+                indent=2,
+            )
+            self.failed.emit(txt)
+
+
 class QtBackend(QObject):
     """Qt/QML bridge for AppService.
 
     All methods return JSON strings to keep QML integration minimal.
     """
 
+    scanStarted = Signal()
+    scanFinished = Signal(str)
+    scanError = Signal(str)
+
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._service: AppService = _build_service()
+
+        self._scan_thread: Optional[QThread] = None
+        self._scan_worker: Optional[_ScanWorker] = None
 
     # -------- Helpers --------
 
@@ -40,12 +82,61 @@ class QtBackend(QObject):
         except Exception as e:
             return self._err("list_adapters_failed", details=str(e))
 
-    # -------- Scan --------
+    # -------- Scan (ASYNC for GUI) --------
+
+    @Slot(str, float, bool)
+    def scanAsync(self, iface: str, timeout_s: float = 5.0, match_gsd: bool = False) -> None:
+        # evita scan concorrente
+        if self._scan_thread is not None:
+            return
+
+        self.scanStarted.emit()
+
+        self._scan_thread = QThread()
+        self._scan_worker = _ScanWorker(self._service, iface, timeout_s, match_gsd)
+        self._scan_worker.moveToThread(self._scan_thread)
+
+        self._scan_thread.started.connect(self._scan_worker.run)
+
+        self._scan_worker.finished.connect(self._on_scan_finished)
+        self._scan_worker.failed.connect(self._on_scan_failed)
+
+        # cleanup: quit thread, delete worker, delete thread
+        self._scan_worker.finished.connect(self._scan_thread.quit)
+        self._scan_worker.failed.connect(self._scan_thread.quit)
+
+        self._scan_worker.finished.connect(self._scan_worker.deleteLater)
+        self._scan_worker.failed.connect(self._scan_worker.deleteLater)
+
+        self._scan_thread.finished.connect(self._on_scan_thread_finished)
+        self._scan_thread.finished.connect(self._scan_thread.deleteLater)
+
+        self._scan_thread.start()
+
+    @Slot(str)
+    def _on_scan_finished(self, txt: str) -> None:
+        self.scanFinished.emit(txt)
+        # não limpa thread aqui; espera thread.finished
+
+    @Slot(str)
+    def _on_scan_failed(self, txt: str) -> None:
+        self.scanError.emit(txt)
+        # não limpa thread aqui; espera thread.finished
+
+    @Slot()
+    def _on_scan_thread_finished(self) -> None:
+        self._scan_worker = None
+        self._scan_thread = None
+    # -------- Scan (SYNC, keep for CLI/debug) --------
 
     @Slot(str, float, bool, result=str)
     def scan(self, iface: str, timeout_s: float = 5.0, match_gsd: bool = False) -> str:
         try:
-            devices = self._service.scan_devices(iface=iface, timeout_s=float(timeout_s), match_gsd=bool(match_gsd))
+            devices = self._service.scan_devices(
+                iface=iface,
+                timeout_s=float(timeout_s),
+                match_gsd=bool(match_gsd),
+            )
             return self._ok({"ok": True, "devices": [d.to_dict() for d in devices]})
         except Exception as e:
             return self._err("scan_failed", details=str(e))
@@ -80,9 +171,7 @@ class QtBackend(QObject):
         min_f841_ratio: float = 0.90,
         min_aff0_bytes: int = 32,
     ) -> str:
-        """Validate in fake mode without network."""
         try:
-            # Build a minimal args-like object compatible with AppService.validate_payload
             args = SimpleNamespace(
                 fake=True,
                 iface=None,
@@ -123,7 +212,9 @@ class QtBackend(QObject):
                 name=str(new_name),
             )
             res = self._service.dcp_set_name(args)
-            return self._ok({"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error})
+            return self._ok(
+                {"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error}
+            )
         except Exception as e:
             return self._err("dcp_set_name_failed", details=str(e))
 
@@ -145,7 +236,9 @@ class QtBackend(QObject):
                 gw=str(gw),
             )
             res = self._service.dcp_set_ip(args)
-            return self._ok({"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error})
+            return self._ok(
+                {"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error}
+            )
         except Exception as e:
             return self._err("dcp_set_ip_failed", details=str(e))
 
@@ -166,7 +259,9 @@ class QtBackend(QObject):
                 duration=float(duration_s),
             )
             res = self._service.dcp_blink(args)
-            return self._ok({"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error})
+            return self._ok(
+                {"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error}
+            )
         except Exception as e:
             return self._err("dcp_blink_failed", details=str(e))
 
@@ -184,6 +279,8 @@ class QtBackend(QObject):
                 timeout=0.0,
             )
             res = self._service.dcp_factory_reset(args)
-            return self._ok({"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error})
+            return self._ok(
+                {"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error}
+            )
         except Exception as e:
             return self._err("dcp_factory_reset_failed", details=str(e))

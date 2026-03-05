@@ -70,27 +70,53 @@ class AppService:
     def scan(self, scapy_iface: str, timeout_s: float, match_gsd: bool) -> str:
         """GUI: scan devices via DCP identify; returns JSON string."""
         try:
-            devs = self.scan_devices(iface=str(scapy_iface), timeout_s=float(timeout_s), match_gsd=bool(match_gsd))
+            discovered = self.scanner.scan_dcp(iface=str(scapy_iface), timeout_s=float(timeout_s))
 
             devices_out: List[Dict[str, Any]] = []
-            for d in devs:
-                devices_out.append(
-                    {
-                        "name": d.name,
-                        "ip": d.ip,
-                        "mac": d.mac,
-                        "vendor_id": d.vendor_id,
-                        "device_id": d.device_id,
-                        "gsd_match": d.gsd_match,
-                        "gsd_match_reason": d.gsd_match_reason,
-                        "gsd_match_score": d.gsd_match_score,
-                    }
-                )
+            for d in discovered:
+                name = getattr(d, "name", None)
+                ip = getattr(d, "ip", None)
+                mac = getattr(d, "mac", None)
+                vendor_id = getattr(d, "vendor_id", None)
+                device_id = getattr(d, "device_id", None)
+
+                vendor_name = getattr(d, "vendor_name", None) or getattr(d, "vendor", None) or ""
+                device_type = getattr(d, "device_type", None) or getattr(d, "product_name", None) or ""
+
+                item: Dict[str, Any] = {
+                    "name": name or "",
+                    "ip": ip or "",
+                    "mac": (mac or "").lower(),
+                    "vendor_id": "" if vendor_id is None else str(vendor_id),
+                    "device_id": "" if device_id is None else str(device_id),
+                    "vendor_name": vendor_name,
+                    "device_type": device_type,
+                    "gsd_match": None,
+                    "gsd_match_reason": "",
+                    "gsd_match_score": None,
+                }
+
+                if bool(match_gsd) and vendor_id is not None and device_id is not None:
+                    try:
+                        vid = _parse_int_auto(vendor_id)
+                        did = _parse_int_auto(device_id)
+                        m = self.match(vendor_id=vid, device_id=did, name=str(name or ""))
+                        item["gsd_match"] = m.get("gsd_match")
+                        item["gsd_match_reason"] = m.get("gsd_match_reason", "")
+                        item["gsd_match_score"] = m.get("gsd_match_score")
+                    except Exception as e:
+                        # não derruba o scan inteiro só por causa do match
+                        item["gsd_match"] = None
+                        item["gsd_match_reason"] = f"match_error: {e}"
+                        item["gsd_match_score"] = None
+
+                devices_out.append(item)
 
             return _to_json_ok(devices=devices_out)
+
         except Exception as e:
             return _to_json_err("scan", e, raw={"iface": scapy_iface, "timeout_s": timeout_s, "match_gsd": match_gsd})
-
+        
     def matchGui(self, vendor_id_text: str, device_id_text: str, name_hint: str = "") -> str:
         """GUI: match GSDML using string inputs."""
         try:

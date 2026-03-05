@@ -8,6 +8,7 @@ src/pnio_validator/dcp.py
 src/pnio_validator/dcp_fake.py
 src/pnio_validator/device_model.py
 src/pnio_validator/gsdml_parser.py
+src/pnio_validator/main_qml.py
 src/pnio_validator/main_qt.py
 src/pnio_validator/models.py
 src/pnio_validator/pnio_client.py
@@ -24,6 +25,7 @@ src/pnio_validator.egg-info/dependency_links.txt
 src/pnio_validator.egg-info/entry_points.txt
 src/pnio_validator.egg-info/requires.txt
 src/pnio_validator.egg-info/top_level.txt
+src/pnio_validator/gui/scan_async.py
 src/pnio_validator/util/__init__.py
 src/pnio_validator/util/mac.py
 tests/test_cli_match.py

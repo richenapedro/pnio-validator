@@ -9,9 +9,9 @@ from scapy.all import (
     Raw,
     conf,
     get_if_list,
-    sniff,
     sendp,
     get_if_hwaddr,
+    AsyncSniffer,
 )
 
 PNIO_ETHERTYPE = 0x8892
@@ -39,7 +39,7 @@ class DiscoveredDevice:
 def _pick_iface(user_iface: str) -> str:
     """
     Scapy on Windows often uses NPF device names (\\Device\\NPF_{GUID}).
-    We try exact match, then case-insensitive, then substring match.
+    Try exact match, then case-insensitive, then substring match.
     """
     ifaces = get_if_list()
     if user_iface in ifaces:
@@ -57,43 +57,33 @@ def _pick_iface(user_iface: str) -> str:
 
 
 def _ethertype(pkt) -> int | None:
-    """
-    Returns payload ethertype, handling VLAN-tagged frames (802.1Q).
-    """
+    """Returns payload ethertype, handling VLAN-tagged frames (802.1Q)."""
     if not pkt.haslayer(Ether):
         return None
-    et = pkt.getlayer(Ether).type
 
-    # VLAN tagged frame: Ether.type == 0x8100, actual ethertype in Dot1Q.type
+    et = pkt[Ether].type
     if et == 0x8100 and pkt.haslayer(Dot1Q):
-        return pkt.getlayer(Dot1Q).type
-
+        return pkt[Dot1Q].type
     return et
 
 
-def _build_dcp_identify_request(src_mac: str) -> Ether:
+def _build_dcp_identify_request_like_proneta(src_mac: str) -> Ether:
     """
-    Minimal PROFINET DCP Identify request frame (Layer 2).
+    FEFE Identify Request (copiado do request capturado do PRONETA).
 
-    NOTE:
-    This is a pragmatic "works in many networks" frame.
-    Later we can implement full DCP properly (including parsing header fields).
+    Hex capturado (após o EtherType 0x8892):
+      fefe05000000031700c00004ffff0000
     """
-    # DCP header (12 bytes):
-    # FrameID (2) + ServiceID (1) + ServiceType (1) + XID (4) + ResponseDelay (2) + DataLength (2)
-    frame_id = b"\xfe\xfe"          # DCP Identify
-    service_id = b"\x05"            # Identify
-    service_type = b"\x00"          # Request
-    xid = b"\x12\x34\x56\x78"       # Transaction id (any)
-    response_delay = b"\x00\x00"
+    payload = bytes.fromhex("fefe05000000031700c00004ffff0000")
 
-    # DCP "All" block (Option=0xFF, Suboption=0xFF, BlockLength=0)
-    block = b"\xff\xff\x00\x00"
-    data_length = (len(block)).to_bytes(2, "big")
+    pkt = Ether(dst=DCP_MULTICAST_MAC, src=src_mac, type=PNIO_ETHERTYPE) / Raw(payload)
 
-    payload = frame_id + service_id + service_type + xid + response_delay + data_length + block
+    # Ethernet mínimo ~60 bytes (sem FCS). Alguns devices ignoram frame menor.
+    b = bytes(pkt)
+    if len(b) < 60:
+        pkt = pkt / Raw(b"\x00" * (60 - len(b)))
 
-    return Ether(dst=DCP_MULTICAST_MAC, src=src_mac, type=PNIO_ETHERTYPE) / Raw(load=payload)
+    return pkt
 
 
 def _parse_dcp_blocks(raw_bytes: bytes):
@@ -101,9 +91,9 @@ def _parse_dcp_blocks(raw_bytes: bytes):
     Best-effort DCP response parsing.
 
     Tries to extract:
-    - NameOfStation (common: opt=0x02, sub=0x02)
-    - IP (common: opt=0x01, sub=0x02 or 0x03)
-    - Vendor/Device IDs (heuristic; not guaranteed)
+    - NameOfStation (opt=0x02, sub=0x02)
+    - IP (opt=0x01, sub=0x02/0x03)
+    - Vendor/Device IDs (heurística; não garantido)
     """
     name = None
     ip = None
@@ -111,34 +101,34 @@ def _parse_dcp_blocks(raw_bytes: bytes):
     device_id = None
 
     try:
-        # Many DCP responses have 12 bytes header before the first block
+        # DCP header típico tem 12 bytes antes dos blocks
         i = 12
         while i + 4 <= len(raw_bytes):
             opt = raw_bytes[i]
             sub = raw_bytes[i + 1]
-            blen = int.from_bytes(raw_bytes[i + 2:i + 4], "big")
+            blen = int.from_bytes(raw_bytes[i + 2 : i + 4], "big")
 
             data_start = i + 4
-            data = raw_bytes[data_start:data_start + blen]
+            data = raw_bytes[data_start : data_start + blen]
 
-            # Device Properties / NameOfStation
+            # NameOfStation: 2 bytes BlockInfo + string
             if opt == 0x02 and sub == 0x02 and blen >= 2:
                 cand = data[2:]
                 cand = cand.split(b"\x00")[0].strip()
                 if cand:
                     name = cand.decode("utf-8", errors="ignore")
 
-            # IP parameters block: 2 bytes BlockInfo + 4 bytes IP
+            # IP: 2 bytes BlockInfo + 4 bytes IP
             if opt == 0x01 and sub in (0x02, 0x03) and blen >= 6:
                 ip_bytes = data[2:6]
                 ip = ".".join(str(b) for b in ip_bytes)
 
-            # Vendor/Device heuristics (not guaranteed; keep best-effort)
+            # Vendor/Device: heurística (pode variar por stack)
             if opt == 0x02 and sub in (0x03, 0x01) and blen >= 6:
                 vendor_id = int.from_bytes(data[2:4], "big")
                 device_id = int.from_bytes(data[4:6], "big")
 
-            # Blocks are aligned to even length
+            # Blocks alinhados em par
             step = 4 + blen
             if step % 2 == 1:
                 step += 1
@@ -150,18 +140,12 @@ def _parse_dcp_blocks(raw_bytes: bytes):
 
 
 def scan_dcp(iface: str, timeout_s: float = 5.0) -> List[DiscoveredDevice]:
-    """
-    Sends a DCP Identify request and listens for responses.
-
-    Windows notes:
-    - Usually requires PowerShell as Administrator
-    - Requires Npcap installed
-    - Use \\Device\\NPF_{GUID} for iface when needed (Scapy style)
-    """
     real_iface = _pick_iface(iface)
-    conf.iface = real_iface
 
-    # Get MAC of the selected adapter (portable across PCs)
+    conf.use_pcap = True
+    conf.iface = real_iface
+    conf.sniff_promisc = True  # ajuda no Windows/Npcap
+
     try:
         src_mac = get_if_hwaddr(real_iface)
         if not src_mac:
@@ -172,17 +156,28 @@ def scan_dcp(iface: str, timeout_s: float = 5.0) -> List[DiscoveredDevice]:
             "Run PowerShell as Administrator and ensure Npcap is installed."
         ) from e
 
-    req = _build_dcp_identify_request(src_mac=src_mac)
+    req = _build_dcp_identify_request_like_proneta(src_mac=src_mac)
 
     devices: dict[str, DiscoveredDevice] = {}
 
     def _handle(pkt) -> None:
+        # BPF já filtra 0x8892, mas mantém seguro
         if _ethertype(pkt) != PNIO_ETHERTYPE:
             return
+        if not pkt.haslayer(Ether) or not pkt.haslayer(Raw):
+            return
 
-        eth = pkt.getlayer(Ether)
-        raw = bytes(pkt[Raw].load) if Raw in pkt else b""
-        name, ip, vid, did = _parse_dcp_blocks(raw)
+        eth = pkt[Ether]
+        raw_bytes = bytes(pkt[Raw].load)
+
+        # FEFF = Identify Response
+        if len(raw_bytes) < 2:
+            return
+        frame_id = int.from_bytes(raw_bytes[0:2], "big")
+        if frame_id != 0xFEFF:
+            return
+
+        name, ip, vid, did = _parse_dcp_blocks(raw_bytes)
 
         devices[eth.src.lower()] = DiscoveredDevice(
             name=name,
@@ -192,15 +187,25 @@ def scan_dcp(iface: str, timeout_s: float = 5.0) -> List[DiscoveredDevice]:
             device_id=did,
         )
 
-    # Send Identify first, then sniff for responses (simple + reliable)
-    sendp(req, iface=real_iface, verbose=False)
-
-    sniff(
+    sniffer = AsyncSniffer(
         iface=real_iface,
-        timeout=timeout_s,
         store=False,
         prn=_handle,
-        lfilter=lambda p: _ethertype(p) == PNIO_ETHERTYPE,
+        filter="ether proto 0x8892",
+        promisc=True,
     )
+
+    # 1) começa sniff antes do send
+    sniffer.start()
+
+    # 2) manda vários requests (melhora muito em rede industrial)
+    sendp(req, iface=real_iface, count=5, inter=0.2, verbose=False)
+
+    # 3) espera até timeout, para e coleta
+    sniffer.join(timeout=timeout_s)
+    try:
+        sniffer.stop()
+    except Exception:
+        pass
 
     return list(devices.values())
