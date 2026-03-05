@@ -75,6 +75,16 @@ class QtBackend(QObject):
 
     # -------- Adapters --------
 
+    @Slot(str, result=str)
+    def importGsdmlFiles(self, files_json: str) -> str:
+        # files_json: '["file:///C:/a.xml","file:///C:/b.xml"]'
+        return self._service.importGsdmlFiles(files_json)
+
+    @Slot(str, result=str)
+    def importGsdmlFolder(self, folder_url: str) -> str:
+        # folder_url: "file:///C:/some/folder"
+        return self._service.importGsdmlFolder(folder_url)
+    
     @Slot(result=str)
     def listAdapters(self) -> str:
         try:

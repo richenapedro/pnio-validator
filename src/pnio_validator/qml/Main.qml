@@ -2,6 +2,7 @@ import QtQuick 2.12
 import QtQuick.Controls 2.12
 import QtQuick.Controls.Material 2.12
 import QtQuick.Layouts 1.12
+import Qt.labs.platform 1.1
 
 ApplicationWindow {
     id: win
@@ -23,7 +24,7 @@ ApplicationWindow {
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: Material.Cyan
     Material.primary: Material.BlueGrey
-
+    property var validateLoaderRef: null
     property color cBg: darkMode ? "#0f1218" : "#f3f5f8"
     property color cCard: darkMode ? "#171c25" : "#ffffff"
     property color cTop: darkMode ? "#141a24" : "#ffffff"
@@ -74,8 +75,16 @@ ApplicationWindow {
             const obj = JSON.parse(txt);
             const arr = obj.adapters || [];
             adaptersModel = arr;
-            for (let i = 0; i < arr.length; i++)
-                adaptersLm.append(arr[i]);
+            for (let i = 0; i < arr.length; i++) {
+                const a = arr[i] || {};
+                adaptersLm.append({
+                    friendly_name: s(a.friendly_name),
+                    scapy_iface: s(a.scapy_iface),
+                    mac: s(a.mac).toLowerCase(),
+                    guid: s(a.guid),
+                    index: (a.index === null || a.index === undefined) ? i : Number(a.index)
+                });
+            }
         } catch (e) {
             logArea.text = "ERROR parsing adapters JSON: " + e + "\n\nRaw:\n" + txt;
         }
@@ -291,7 +300,55 @@ ApplicationWindow {
                             implicitWidth: 52
                             onToggled: win.darkMode = checked
                         }
+                        // --- Import dialogs ---
+                        FileDialog {
+                            id: gsdFileDialog
+                            title: "Select GSDML files"
+                            fileMode: FileDialog.OpenFiles
+                            nameFilters: ["GSDML / XML (*.xml)", "All files (*.*)"]
+                            onAccepted: {
+                                // files is a JS array of urls
+                                const payload = JSON.stringify(gsdFileDialog.files);
+                                logArea.text = backend.importGsdmlFiles(payload);
+                            }
+                        }
 
+                        FolderDialog {
+                            id: gsdFolderDialog
+                            title: "Select folder with GSDML files"
+                            onAccepted: {
+                                logArea.text = backend.importGsdmlFolder(gsdFolderDialog.folder);
+                            }
+                        }
+
+                        Menu {
+                            id: importMenu
+                            MenuItem {
+                                text: "Import GSDML files..."
+                                onTriggered: gsdFileDialog.open()
+                            }
+                            MenuItem {
+                                text: "Import folder..."
+                                onTriggered: gsdFolderDialog.open()
+                            }
+                        }
+
+                        // --- Button + ---
+                        PillButton {
+                            text: "＋"
+                            Layout.alignment: Qt.AlignVCenter
+                            implicitHeight: 34
+                            implicitWidth: 44
+                            onClicked: importMenu.open()
+                        }
+
+                        PillButton {
+                            text: "Reload adapters"
+                            Layout.alignment: Qt.AlignVCenter
+                            implicitHeight: 34
+                            implicitWidth: 160
+                            onClicked: refreshAdapters()
+                        }
                         PillButton {
                             text: "Reload adapters"
                             Layout.alignment: Qt.AlignVCenter
@@ -709,8 +766,9 @@ ApplicationWindow {
                                     verticalAlignment: Text.AlignVCenter
                                 }
                                 Text {
-                                    text: (model.gsd_match_score !== "" && model.gsd_match_score !== "null") ? "✓" : "-"
-                                    color: cMuted
+                                    property real score: Number(model.gsd_match_score)
+                                    text: (model.gsd_match !== null && model.gsd_match !== undefined && String(model.gsd_match) !== "") ? "✓" : "-"
+                                    color: (score > 0) ? win.cText : win.cMuted
                                     font.pixelSize: 12
                                     Layout.preferredWidth: 50
                                     verticalAlignment: Text.AlignVCenter
@@ -769,7 +827,30 @@ ApplicationWindow {
 
         CardFrame {
             title: "Validate / DCP"
+            function fillIpFieldsFromSelection() {
+                const d = win.selectedDevice();
+                if (!d) {
+                    ip.text = "";
+                    mask.text = "";
+                    gw.text = "";
+                    return;
+                }
 
+                // só sobrescreve se o usuário não estiver editando naquele momento
+                if (!ip.activeFocus)
+                    ip.text = win.s(d.ip);
+                if (!mask.activeFocus)
+                    mask.text = win.s(d.mask);
+                if (!gw.activeFocus)
+                    gw.text = win.s(d.gateway);
+            }
+
+            Connections {
+                target: win
+                function onSelectedDeviceIndexChanged() {
+                    fillIpFieldsFromSelection();
+                }
+            }
             // -------- Row 1: Target + MAC (mais compacto e “encaixado” no painel direito)
             GridLayout {
                 Layout.fillWidth: true
@@ -950,7 +1031,7 @@ ApplicationWindow {
                     Field {
                         id: ip
                         Layout.fillWidth: true
-                        text: "192.168.0.10"
+                        text: ""
                     }
 
                     Label {
@@ -961,7 +1042,7 @@ ApplicationWindow {
                     Field {
                         id: mask
                         Layout.fillWidth: true
-                        text: "255.255.255.0"
+                        text: "255.255.0.0"
                     }
 
                     Label {
@@ -972,7 +1053,7 @@ ApplicationWindow {
                     Field {
                         id: gw
                         Layout.fillWidth: true
-                        text: "192.168.0.1"
+                        text: ""
                     }
                 }
 
@@ -1078,10 +1159,13 @@ ApplicationWindow {
             }
 
             Loader {
+                id: validateLoader
                 Layout.fillWidth: true
                 Layout.minimumWidth: 360
                 Layout.preferredWidth: win.width * 0.38
                 sourceComponent: validateCard
+
+                Component.onCompleted: win.validateLoaderRef = validateLoader
             }
         }
     }
@@ -1096,8 +1180,11 @@ ApplicationWindow {
                 sourceComponent: discoveryCard
             }
             Loader {
+                id: validateLoader
                 Layout.fillWidth: true
                 sourceComponent: validateCard
+
+                Component.onCompleted: win.validateLoaderRef = validateLoader
             }
         }
     }
@@ -1125,7 +1212,11 @@ ApplicationWindow {
                         device_id: s(devs[i].device_id),
                         vendor_name: s(devs[i].vendor_name),
                         device_type: s(devs[i].device_type),
-                        gsd_match_score: s(devs[i].gsd_match_score)
+                        gsd_match: (devs[i].gsd_match === null || devs[i].gsd_match === undefined) ? "" : devs[i].gsd_match,
+                        // <<< ADD
+                        gsd_match_reason: s(devs[i].gsd_match_reason),
+                        // <<< opcional
+                        gsd_match_score: devs[i].gsd_match_score       // <<< deixa numérico, sem s()
                     });
                 }
                 if (devicesLm.count > 0)

@@ -1,11 +1,15 @@
+# app_service.py
+
 from __future__ import annotations
 
 import inspect
 import json
+import re
 from dataclasses import dataclass
-from typing import Any, Dict, List
-
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Dict, List
+from urllib.parse import unquote
 
 
 def _parse_int_auto(x: Any) -> int:
@@ -16,6 +20,30 @@ def _parse_int_auto(x: Any) -> int:
     if s.lower().startswith("0x"):
         return int(s, 16)
     return int(s, 10)
+
+
+def _qurl_to_path(s: str) -> str:
+    """
+    QML often sends urls like:
+      file:///C:/path/to/file.xml
+    Convert to a usable filesystem path on Windows.
+    """
+    if not s:
+        return ""
+    t = str(s).strip()
+
+    if t.startswith("file:///"):
+        t = t[len("file:///") :]
+    elif t.startswith("file://"):
+        t = t[len("file://") :]
+
+    t = unquote(t)
+
+    # If it still looks like /C:/..., drop leading slash
+    if re.match(r"^/[A-Za-z]:/", t):
+        t = t[1:]
+
+    return t
 
 
 def _to_json_ok(**payload) -> str:
@@ -41,16 +69,13 @@ class AppService:
     scanner: Any
     registry: Any
     validator: Any
-    dcp_real: Any   # factory/callable: dcp_real(iface=..., timeout_s=...)
-    dcp_fake: Any   # factory/callable: dcp_fake()
+    dcp_real: Any  # factory/callable: dcp_real(iface=..., timeout_s=...)
+    dcp_fake: Any  # factory/callable: dcp_fake()
 
     # ----------------- internal helpers -----------------
 
     def _call(self, fn, /, **kwargs):
-        """Call a function filtering kwargs by its signature.
-
-        Keeps compatibility between Real/Fake DCP client even if parameter names differ.
-        """
+        """Call a function filtering kwargs by its signature."""
         sig = inspect.signature(fn)
         accepted = {k: v for k, v in kwargs.items() if k in sig.parameters}
         return fn(**accepted)
@@ -60,7 +85,6 @@ class AppService:
     # ======================================================================
 
     def listAdapters(self) -> str:
-        """GUI: list adapters as JSON string."""
         try:
             adapters = self.list_adapters()
             return _to_json_ok(adapters=adapters)
@@ -68,7 +92,6 @@ class AppService:
             return _to_json_err("listAdapters", e)
 
     def scan(self, scapy_iface: str, timeout_s: float, match_gsd: bool) -> str:
-        """GUI: scan devices via DCP identify; returns JSON string."""
         try:
             discovered = self.scanner.scan_dcp(iface=str(scapy_iface), timeout_s=float(timeout_s))
 
@@ -91,9 +114,9 @@ class AppService:
                     "device_id": "" if device_id is None else str(device_id),
                     "vendor_name": vendor_name,
                     "device_type": device_type,
-                    "gsd_match": None,
-                    "gsd_match_reason": "",
-                    "gsd_match_score": None,
+                    "gsd_match": {},  # QML-friendly (never null)
+                    "gsd_match_reason": "no_match",
+                    "gsd_match_score": 0.0,
                 }
 
                 if bool(match_gsd) and vendor_id is not None and device_id is not None:
@@ -101,14 +124,13 @@ class AppService:
                         vid = _parse_int_auto(vendor_id)
                         did = _parse_int_auto(device_id)
                         m = self.match(vendor_id=vid, device_id=did, name=str(name or ""))
-                        item["gsd_match"] = m.get("gsd_match")
-                        item["gsd_match_reason"] = m.get("gsd_match_reason", "")
-                        item["gsd_match_score"] = m.get("gsd_match_score")
+                        item["gsd_match"] = m.get("gsd_match") or {}
+                        item["gsd_match_reason"] = m.get("gsd_match_reason", "") or ""
+                        item["gsd_match_score"] = float(m.get("gsd_match_score") or 0.0)
                     except Exception as e:
-                        # não derruba o scan inteiro só por causa do match
-                        item["gsd_match"] = None
+                        item["gsd_match"] = {}
                         item["gsd_match_reason"] = f"match_error: {e}"
-                        item["gsd_match_score"] = None
+                        item["gsd_match_score"] = 0.0
 
                 devices_out.append(item)
 
@@ -116,9 +138,8 @@ class AppService:
 
         except Exception as e:
             return _to_json_err("scan", e, raw={"iface": scapy_iface, "timeout_s": timeout_s, "match_gsd": match_gsd})
-        
+
     def matchGui(self, vendor_id_text: str, device_id_text: str, name_hint: str = "") -> str:
-        """GUI: match GSDML using string inputs."""
         try:
             vendor_id = _parse_int_auto(vendor_id_text)
             device_id = _parse_int_auto(device_id_text)
@@ -130,19 +151,84 @@ class AppService:
                 e,
                 raw={"vendor_id": vendor_id_text, "device_id": device_id_text, "name": name_hint},
             )
+    def importGsdmlFiles(self, files_json: str) -> str:
+        """GUI: import multiple GSDML files. `files_json` is a JSON list of file URLs/paths."""
+        try:
+            import json
+            from pathlib import Path
+
+            # input can be: ["file:///C:/a.xml", "C:\\b.xml", ...]
+            raw = json.loads(files_json) if files_json else []
+            if not isinstance(raw, list):
+                raise ValueError("files_json must be a JSON list of file paths/urls")
+
+            imported = []
+            errors = []
+
+            def _to_path(s: str) -> str:
+                s = str(s or "")
+                if s.startswith("file:///"):
+                    # QML file url -> windows path
+                    s = s[8:]
+                    # keep leading slash handling: /C:/... may appear
+                    if len(s) >= 3 and s[0] == "/" and s[2] == ":":
+                        s = s[1:]
+                return s
+
+            for item in raw:
+                fp = _to_path(item)
+                try:
+                    entry = self.registry.import_gsdml(fp)  # see note below
+                    imported.append(entry.to_dict() if hasattr(entry, "to_dict") else entry)
+                except Exception as e:
+                    errors.append({"file": fp, "error": str(e)})
+
+            return _to_json_ok(imported=imported, errors=errors)
+
+        except Exception as e:
+            return _to_json_err("importGsdmlFiles", e, raw={"files_json": files_json})
+
+    def importGsdmlFolder(self, folder_url: str) -> str:
+        """GUI: import all *.xml in a folder. `folder_url` can be file:///..."""
+        try:
+            from pathlib import Path
+
+            s = str(folder_url or "")
+            if s.startswith("file:///"):
+                s = s[8:]
+                if len(s) >= 3 and s[0] == "/" and s[2] == ":":
+                    s = s[1:]
+
+            folder = Path(s)
+            if not folder.exists() or not folder.is_dir():
+                raise FileNotFoundError(str(folder))
+
+            xmls = sorted(folder.glob("*.xml"))
+
+            imported = []
+            errors = []
+
+            for f in xmls:
+                try:
+                    entry = self.registry.import_gsdml(f)  # see note below
+                    imported.append(entry.to_dict() if hasattr(entry, "to_dict") else entry)
+                except Exception as e:
+                    errors.append({"file": str(f), "error": str(e)})
+
+            return _to_json_ok(folder=str(folder), imported=imported, errors=errors)
+
+        except Exception as e:
+            return _to_json_err("importGsdmlFolder", e, raw={"folder_url": folder_url})
 
     def validateFake(self, device_name: str, scenario: str) -> str:
-        """GUI: run strict validation in fake mode; returns JSON string."""
         try:
             args = SimpleNamespace(
                 fake=True,
                 scenario=str(scenario),
                 base_latency_ms=0.0,
                 extra_latency_ms=0.0,
-
                 iface=None,
                 adapter=None,
-
                 device_name=str(device_name),
                 slot=0,
                 subslot=1,
@@ -159,8 +245,8 @@ class AppService:
 
         except Exception as e:
             return _to_json_err("validateFake", e, raw={"device_name": device_name, "scenario": scenario})
+
     def dcpSetName(self, scapy_iface: str, target_mac: str, new_name: str) -> str:
-        """GUI: DCP set station name REAL; returns JSON string."""
         try:
             client = self.dcp_real(iface=str(scapy_iface), timeout_s=3.0)
             res = self._call(
@@ -175,7 +261,6 @@ class AppService:
             return _to_json_err("dcpSetName", e, raw={"iface": scapy_iface, "mac": target_mac, "name": new_name})
 
     def dcpSetIp(self, scapy_iface: str, target_mac: str, ip: str, mask: str, gw: str) -> str:
-        """GUI: DCP set IPv4/mask/gw REAL; returns JSON string."""
         try:
             client = self.dcp_real(iface=str(scapy_iface), timeout_s=3.0)
             res = self._call(
@@ -194,7 +279,6 @@ class AppService:
             return _to_json_err("dcpSetIp", e, raw={"iface": scapy_iface, "mac": target_mac, "ip": ip, "mask": mask, "gw": gw})
 
     def dcpBlink(self, scapy_iface: str, target_mac: str, on: bool, duration_s: float) -> str:
-        """GUI: DCP blink/identify REAL; returns JSON string."""
         try:
             client = self.dcp_real(iface=str(scapy_iface), timeout_s=3.0)
             res = self._call(
@@ -211,7 +295,6 @@ class AppService:
             return _to_json_err("dcpBlink", e, raw={"iface": scapy_iface, "mac": target_mac, "on": on, "duration_s": duration_s})
 
     def dcpFactoryReset(self, scapy_iface: str, target_mac: str) -> str:
-        """GUI: DCP factory reset REAL (if supported by your real client)."""
         try:
             client = self.dcp_real(iface=str(scapy_iface), timeout_s=3.0)
             res = self._call(
@@ -227,8 +310,6 @@ class AppService:
     # ======================================================================
     # CLI API (kept as-is)
     # ======================================================================
-
-    # -------- Adapters / Scan / Match --------
 
     def list_adapters(self) -> List[Dict[str, Any]]:
         adapters = self.adapters.list_adapters()
@@ -287,21 +368,12 @@ class AppService:
             "gsd_match_score": None if score is None else float(score),
         }
 
-    # -------- DCP actions (CLI style) --------
-
     def _resolve_dcp_iface(self, args: Any) -> str:
-        """Resolve iface only when needed (real mode)."""
         if bool(args.fake):
             return ""
         return self.adapters.resolve_iface(args.iface, args.adapter)
 
     def _resolve_target_mac_for_dcp(self, args: Any, iface: str) -> str:
-        """Resolve target MAC for DCP actions.
-
-        - If --mac provided: use it
-        - If --fake: derive deterministic MAC from device-name (preferred) or ip
-        - Else: resolve via scan (device-name / ip)
-        """
         from .util.mac import deterministic_fake_mac
 
         if getattr(args, "mac", None):
@@ -328,12 +400,9 @@ class AppService:
         raise ValueError("Target device not found. Provide --mac or use --device-name/--ip with a reachable device.")
 
     def dcp_set_name(self, args: Any):
-        """DCP: set station name."""
         iface = self._resolve_dcp_iface(args)
         client = self.dcp_fake() if bool(args.fake) else self.dcp_real(iface=iface, timeout_s=float(args.timeout))
-
         target_mac = self._resolve_target_mac_for_dcp(args, iface)
-
         return self._call(
             client.set_name,
             target_mac=target_mac,
@@ -343,12 +412,9 @@ class AppService:
         )
 
     def dcp_set_ip(self, args: Any):
-        """DCP: set IPv4/Mask/Gateway."""
         iface = self._resolve_dcp_iface(args)
         client = self.dcp_fake() if bool(args.fake) else self.dcp_real(iface=iface, timeout_s=float(args.timeout))
-
         target_mac = self._resolve_target_mac_for_dcp(args, iface)
-
         return self._call(
             client.set_ip,
             target_mac=target_mac,
@@ -362,12 +428,9 @@ class AppService:
         )
 
     def dcp_blink(self, args: Any):
-        """DCP: blink/identify device (best-effort)."""
         iface = self._resolve_dcp_iface(args)
         client = self.dcp_fake() if bool(args.fake) else self.dcp_real(iface=iface, timeout_s=float(args.timeout))
-
         target_mac = self._resolve_target_mac_for_dcp(args, iface)
-
         return self._call(
             client.blink,
             target_mac=target_mac,
@@ -379,12 +442,9 @@ class AppService:
         )
 
     def dcp_factory_reset(self, args: Any):
-        """DCP: factory reset (placeholder)."""
         iface = self._resolve_dcp_iface(args)
         client = self.dcp_fake() if bool(args.fake) else self.dcp_real(iface=iface, timeout_s=float(args.timeout))
-
         target_mac = self._resolve_target_mac_for_dcp(args, iface)
-
         return self._call(
             client.factory_reset,
             target_mac=target_mac,
@@ -392,13 +452,7 @@ class AppService:
             no_wait=False,
         )
 
-    # -------- Validation --------
-
     def validate_device(self, args: Any):
-        """Run strict validation using either fake or real PNIO client.
-
-        Returns: (result, meta)
-        """
         from datetime import datetime
 
         from .pnio_client import PnioClient, PnioClientConfig
@@ -453,11 +507,6 @@ class AppService:
         return result, meta
 
     def validate_payload(self, args: Any) -> Dict[str, Any]:
-        """GUI-friendly validation call.
-
-        Returns a single JSON-serializable dict:
-        { "result": <validator result dict>, "meta": <report meta dict> }
-        """
         result, meta = self.validate_device(args)
 
         result_d = result.to_dict() if hasattr(result, "to_dict") else result

@@ -4,5 +4,47 @@
     "vendor_id": "0x1234",
     "device_id": "0x5678",
     "product_name": "EM31 Sample"
+  },
+  "0x136:0xb00": {
+    "file": "data/gsdml/GSDML-V2.41-IFM-VSE150-20221103.xml",
+    "vendor_id": "0x136",
+    "device_id": "0xb00",
+    "product_name": "ifm electronic"
+  },
+  "0x14d:0x103": {
+    "file": "data/gsdml/GSDML-V2.34-Festo-CTEU-20230915.xml",
+    "vendor_id": "0x14d",
+    "device_id": "0x103",
+    "product_name": "Festo AG & Co. KG"
+  },
+  "0x2a:0x604": {
+    "file": "data/gsdml/GSDML-V2.35-Siemens-PNPNIOC-20200924.xml",
+    "vendor_id": "0x2a",
+    "device_id": "0x604",
+    "product_name": "SIEMENS"
+  },
+  "0x337:0x10f2": {
+    "file": "data/gsdml/GSDML-V2.3-0337-INVEOR-20190429.xml",
+    "vendor_id": "0x337",
+    "device_id": "0x10f2",
+    "product_name": "Kostal Industrie Elektrik"
+  },
+  "0x378:0x4": {
+    "file": "data/gsdml/GSDML-V2.35-Balluff-BISV-6108-048-20200614.xml",
+    "vendor_id": "0x378",
+    "device_id": "0x4",
+    "product_name": "Balluff GmbH"
+  },
+  "0x545:0x8078": {
+    "file": "data/gsdml/GSDML-V2.43-Schlegel-PN_BTKXX_(13)(14)-20250130.xml",
+    "vendor_id": "0x545",
+    "device_id": "0x8078",
+    "product_name": "Georg Schlegel GmbH und Co. KG"
+  },
+  "0x83:0x1": {
+    "file": "data/gsdml/GSDML-V2.3-SMC-EX260-20160408.xml",
+    "vendor_id": "0x83",
+    "device_id": "0x1",
+    "product_name": "SMC Corporation"
   }
 }

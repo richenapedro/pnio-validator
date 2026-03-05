@@ -22,6 +22,8 @@ DCP_MULTICAST_MAC = "01:0e:cf:00:00:00"
 class DiscoveredDevice:
     name: Optional[str]
     ip: Optional[str]
+    mask: Optional[str]
+    gateway: Optional[str]
     mac: str
     vendor_id: Optional[int] = None
     device_id: Optional[int] = None
@@ -30,11 +32,12 @@ class DiscoveredDevice:
         return {
             "name": self.name,
             "ip": self.ip,
+            "mask": self.mask,
+            "gateway": self.gateway,
             "mac": self.mac,
             "vendor_id": self.vendor_id,
             "device_id": self.device_id,
         }
-
 
 def _pick_iface(user_iface: str) -> str:
     """
@@ -87,48 +90,56 @@ def _build_dcp_identify_request_like_proneta(src_mac: str) -> Ether:
 
 
 def _parse_dcp_blocks(raw_bytes: bytes):
-    """
-    Best-effort DCP response parsing.
-
-    Tries to extract:
-    - NameOfStation (opt=0x02, sub=0x02)
-    - IP (opt=0x01, sub=0x02/0x03)
-    - Vendor/Device IDs (heurística; não garantido)
-    """
     name = None
     ip = None
+    mask = None
+    gateway = None
     vendor_id = None
     device_id = None
 
+    def _ip4(b: bytes) -> str:
+        return ".".join(str(x) for x in b)
+
     try:
-        # DCP header típico tem 12 bytes antes dos blocks
         i = 12
         while i + 4 <= len(raw_bytes):
             opt = raw_bytes[i]
             sub = raw_bytes[i + 1]
-            blen = int.from_bytes(raw_bytes[i + 2 : i + 4], "big")
+            blen = int.from_bytes(raw_bytes[i + 2:i + 4], "big")
 
             data_start = i + 4
-            data = raw_bytes[data_start : data_start + blen]
+            data = raw_bytes[data_start:data_start + blen]
 
-            # NameOfStation: 2 bytes BlockInfo + string
+            # NameOfStation (opt=0x02 sub=0x02)
             if opt == 0x02 and sub == 0x02 and blen >= 2:
-                cand = data[2:]
-                cand = cand.split(b"\x00")[0].strip()
+                cand = data[2:].split(b"\x00")[0].strip()
                 if cand:
                     name = cand.decode("utf-8", errors="ignore")
 
-            # IP: 2 bytes BlockInfo + 4 bytes IP
-            if opt == 0x01 and sub in (0x02, 0x03) and blen >= 6:
+            # IP Suite (opt=0x01 sub=0x02) -> IP(4) + Mask(4) + GW(4)
+            # Normalmente vem com 2 bytes "BlockInfo" antes
+            if opt == 0x01 and sub == 0x02 and blen >= 2 + 12:
                 ip_bytes = data[2:6]
-                ip = ".".join(str(b) for b in ip_bytes)
+                mask_bytes = data[6:10]
+                gw_bytes = data[10:14]
+                ip = _ip4(ip_bytes)
+                mask = _ip4(mask_bytes)
+                gateway = _ip4(gw_bytes)
 
-            # Vendor/Device: heurística (pode variar por stack)
+            # Alguns devices podem mandar em sub=0x03 (se você quiser manter):
+            if opt == 0x01 and sub == 0x03 and blen >= 2 + 12 and ip is None:
+                ip_bytes = data[2:6]
+                mask_bytes = data[6:10]
+                gw_bytes = data[10:14]
+                ip = _ip4(ip_bytes)
+                mask = _ip4(mask_bytes)
+                gateway = _ip4(gw_bytes)
+
+            # Vendor/Device heuristics
             if opt == 0x02 and sub in (0x03, 0x01) and blen >= 6:
                 vendor_id = int.from_bytes(data[2:4], "big")
                 device_id = int.from_bytes(data[4:6], "big")
 
-            # Blocks alinhados em par
             step = 4 + blen
             if step % 2 == 1:
                 step += 1
@@ -136,9 +147,7 @@ def _parse_dcp_blocks(raw_bytes: bytes):
     except Exception:
         pass
 
-    return name, ip, vendor_id, device_id
-
-
+    return name, ip, mask, gateway, vendor_id, device_id
 def scan_dcp(iface: str, timeout_s: float = 5.0) -> List[DiscoveredDevice]:
     real_iface = _pick_iface(iface)
 
@@ -177,11 +186,13 @@ def scan_dcp(iface: str, timeout_s: float = 5.0) -> List[DiscoveredDevice]:
         if frame_id != 0xFEFF:
             return
 
-        name, ip, vid, did = _parse_dcp_blocks(raw_bytes)
+        name, ip, mask, gw, vid, did = _parse_dcp_blocks(raw_bytes)
 
         devices[eth.src.lower()] = DiscoveredDevice(
             name=name,
             ip=ip,
+            mask=mask,
+            gateway=gw,
             mac=eth.src,
             vendor_id=vid,
             device_id=did,

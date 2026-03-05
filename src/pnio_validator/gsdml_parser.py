@@ -170,14 +170,49 @@ def parse_gsdml(path: str | Path) -> GsdmlModel:
             if v:
                 profile_header[k] = v
 
+    # ---------------- DeviceIdentity (robust) ----------------
     device_identity: Dict[str, str] = {}
     dev = _find_first(root, "DeviceIdentity")
     if dev is not None:
-        for k in ["VendorId", "DeviceId", "InfoText", "VendorName", "DeviceFamily", "ProductName"]:
+        # Some GSDMLs use VendorID/DeviceID (ID uppercase) instead of VendorId/DeviceId.
+        def _get_attr(*names: str) -> Optional[str]:
+            for n in names:
+                v = dev.attrib.get(n)
+                if v:
+                    return v
+            return None
+
+        vendor = _get_attr("VendorId", "VendorID", "vendorId", "vendorID")
+        device = _get_attr("DeviceId", "DeviceID", "deviceId", "deviceID")
+
+        if vendor:
+            device_identity["VendorId"] = vendor  # normalize key
+        if device:
+            device_identity["DeviceId"] = device  # normalize key
+
+        # Other optional attributes (keep as-is)
+        for k in ["InfoText", "VendorName", "DeviceFamily", "ProductName"]:
             v = dev.attrib.get(k)
             if v:
                 device_identity[k] = v
 
+        # Some vendors put these as nested elements with Value="..."
+        # e.g. <VendorName Value="INVEOR"/> inside <DeviceIdentity>
+        if "VendorName" not in device_identity:
+            vn_el = _find_first(dev, "VendorName")
+            if vn_el is not None:
+                v = vn_el.attrib.get("Value") or (vn_el.text or "").strip()
+                if v:
+                    device_identity["VendorName"] = v
+
+        if "ProductName" not in device_identity:
+            pn_el = _find_first(dev, "ProductName")
+            if pn_el is not None:
+                v = pn_el.attrib.get("Value") or (pn_el.text or "").strip()
+                if v:
+                    device_identity["ProductName"] = v
+
+    # ---------------- DAP ----------------
     dap_item = _find_first(root, "DeviceAccessPointItem")
     dap: Optional[GsdmlDap] = None
     if dap_item is not None:
@@ -186,6 +221,7 @@ def parse_gsdml(path: str | Path) -> GsdmlModel:
         dap_name = _resolve_name(texts, dap_item.attrib.get("TextId"))
         dap = GsdmlDap(id=dap_id, module_ident_number=dap_ident, name=dap_name)
 
+    # ---------------- Modules/Submodules ----------------
     modules: List[GsdmlModule] = []
     for mi in _find_all(root, "ModuleItem"):
         mid = mi.attrib.get("ID")
