@@ -162,7 +162,7 @@ class DcpClient:
             return "00:00:00:00:00:00"
 
     def set_name(self, *, target_mac: str, name: str, wait_response: bool = True) -> DcpResult:
-        xid = int(time.time() * 1000).to_bytes(4, "big", signed=False)
+        xid = (int(time.time() * 1000) & 0xFFFFFFFF).to_bytes(4, "big")
         payload = _build_set_name_payload(name=name, xid=xid)
 
         t0 = time.time()
@@ -183,7 +183,7 @@ class DcpClient:
         )
 
     def set_ip(self, *, target_mac: str, ip: str, mask: str, gw: str, wait_response: bool = True) -> DcpResult:
-        xid = int(time.time() * 1000).to_bytes(4, "big", signed=False)
+        xid = (int(time.time() * 1000) & 0xFFFFFFFF).to_bytes(4, "big")
         payload = _build_set_ip_payload(ip=ip, mask=mask, gw=gw, xid=xid)
 
         t0 = time.time()
@@ -217,7 +217,7 @@ class DcpClient:
         # Data format differs between vendors; we use a minimal toggle:
         #   byte0: 0x01 = blink on, 0x00 = blink off
         #   byte1..: duration seconds (uint16, big-endian) if on
-        xid = int(time.time() * 1000).to_bytes(4, "big", signed=False)
+        xid = (int(time.time() * 1000) & 0xFFFFFFFF).to_bytes(4, "big")
 
         flag = b"\x01" if on else b"\x00"
         dur = int(max(0.0, float(duration_s)))

@@ -11,20 +11,20 @@ ApplicationWindow {
     visible: true
     title: "PNIO-Validator"
 
-    // --- force maximized + fixed size ---
     visibility: Window.Maximized
     minimumWidth: Screen.width
     minimumHeight: Screen.height
     maximumWidth: Screen.width
     maximumHeight: Screen.height
 
-    // ---- Theme ----
     property bool darkMode: true
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: Material.Cyan
     Material.primary: Material.BlueGrey
+
     property var validateLoaderRef: null
+
     property color cBg: darkMode ? "#0f1218" : "#f3f5f8"
     property color cCard: darkMode ? "#171c25" : "#ffffff"
     property color cTop: darkMode ? "#141a24" : "#ffffff"
@@ -34,47 +34,53 @@ ApplicationWindow {
     property color cFieldBg: darkMode ? "#111722" : "#f7f9fc"
     property color cFieldBd: darkMode ? "#2a3a55" : "#cbd5e1"
     property color cFocus: "#3aa0ff"
+
     property int actionBtnW: 160
     property int actionBtnH: 34
+
     color: cBg
+
     property int selectedAdapterIndex: -1
+    property int selectedDeviceIndex: -1
+    property var adaptersModel: []
+    property bool scanning: false
 
     function selectedAdapter() {
         if (selectedAdapterIndex < 0 || selectedAdapterIndex >= adaptersLm.count)
             return null;
         return adaptersLm.get(selectedAdapterIndex);
     }
-    function s(x) {
-        return (x === null || x === undefined) ? "" : String(x);
+
+    function selectedAdapterIface() {
+        const a = selectedAdapter();
+        return (a && a.scapy_iface) ? a.scapy_iface : "";
     }
-    function i(x) {
-        return (x === null || x === undefined) ? -1 : Number(x);
-    }
-    ListModel {
-        id: adaptersLm
-    }
-    ListModel {
-        id: devicesLm
-    }   // itens: { name, mac, ip }
-    property int selectedDeviceIndex: -1
+
     function selectedDevice() {
         if (selectedDeviceIndex < 0 || selectedDeviceIndex >= devicesLm.count)
             return null;
         return devicesLm.get(selectedDeviceIndex);
     }
 
-    property var adaptersModel: []
-    property bool scanning: false
+    function s(x) {
+        return (x === null || x === undefined) ? "" : String(x);
+    }
+
+    function i(x) {
+        return (x === null || x === undefined) ? -1 : Number(x);
+    }
 
     function refreshAdapters() {
         const txt = backend.listAdapters();
         logArea.text = txt;
         adaptersLm.clear();
         adaptersModel = [];
+
         try {
             const obj = JSON.parse(txt);
             const arr = obj.adapters || [];
             adaptersModel = arr;
+
             for (let i = 0; i < arr.length; i++) {
                 const a = arr[i] || {};
                 adaptersLm.append({
@@ -90,8 +96,16 @@ ApplicationWindow {
         }
     }
 
+    ListModel {
+        id: adaptersLm
+    }
+
+    ListModel {
+        id: devicesLm
+    }
+
     Component.onCompleted: refreshAdapters()
-    // ---- Components ----
+
     component PillButton: Button {
         id: control
         implicitHeight: win.actionBtnH
@@ -102,7 +116,11 @@ ApplicationWindow {
 
         background: Rectangle {
             radius: 10
-            color: control.down ? (win.darkMode ? "#1a2536" : "#e8eef8") : (control.hovered ? (win.darkMode ? "#1b2a3f" : "#eef3fb") : (win.darkMode ? "#182131" : "#e9eff9"))
+            color: control.down
+                   ? (win.darkMode ? "#1a2536" : "#e8eef8")
+                   : (control.hovered
+                      ? (win.darkMode ? "#1b2a3f" : "#eef3fb")
+                      : (win.darkMode ? "#182131" : "#e9eff9"))
             border.color: control.enabled ? win.cFieldBd : win.cBorder
             border.width: 1
         }
@@ -168,7 +186,7 @@ ApplicationWindow {
 
         clip: true
         implicitWidth: layout.implicitWidth
-        implicitHeight: layout.implicitHeight + 40   // folga pequena p/ não cortar
+        implicitHeight: layout.implicitHeight + 40
 
         Rectangle {
             anchors.fill: parent
@@ -186,6 +204,7 @@ ApplicationWindow {
 
             RowLayout {
                 Layout.fillWidth: true
+
                 Label {
                     text: card.title
                     font.pixelSize: 14
@@ -208,7 +227,6 @@ ApplicationWindow {
         }
     }
 
-    // ---- Main Layout ----
     ScrollView {
         id: pageScroll
         anchors.fill: parent
@@ -225,8 +243,6 @@ ApplicationWindow {
             width: pageScroll.availableWidth
             spacing: 12
 
-            // Top bar
-            // Top bar
             Rectangle {
                 Layout.fillWidth: true
                 height: 56
@@ -244,7 +260,6 @@ ApplicationWindow {
                     anchors.bottomMargin: 10
                     spacing: 12
 
-                    // Left: title + badge
                     RowLayout {
                         Layout.alignment: Qt.AlignVCenter
                         spacing: 10
@@ -280,7 +295,6 @@ ApplicationWindow {
                         Layout.fillWidth: true
                     }
 
-                    // Right: theme + button (grouped)
                     RowLayout {
                         Layout.alignment: Qt.AlignVCenter
                         spacing: 10
@@ -300,14 +314,14 @@ ApplicationWindow {
                             implicitWidth: 52
                             onToggled: win.darkMode = checked
                         }
-                        // --- Import dialogs ---
+
                         FileDialog {
                             id: gsdFileDialog
                             title: "Select GSDML files"
                             fileMode: FileDialog.OpenFiles
                             nameFilters: ["GSDML / XML (*.xml)", "All files (*.*)"]
+
                             onAccepted: {
-                                // files is a JS array of urls
                                 const payload = JSON.stringify(gsdFileDialog.files);
                                 logArea.text = backend.importGsdmlFiles(payload);
                             }
@@ -316,6 +330,7 @@ ApplicationWindow {
                         FolderDialog {
                             id: gsdFolderDialog
                             title: "Select folder with GSDML files"
+
                             onAccepted: {
                                 logArea.text = backend.importGsdmlFolder(gsdFolderDialog.folder);
                             }
@@ -323,32 +338,26 @@ ApplicationWindow {
 
                         Menu {
                             id: importMenu
+
                             MenuItem {
                                 text: "Import GSDML files..."
                                 onTriggered: gsdFileDialog.open()
                             }
+
                             MenuItem {
                                 text: "Import folder..."
                                 onTriggered: gsdFolderDialog.open()
                             }
                         }
 
-                        // --- Button + ---
                         PillButton {
-                            text: "＋"
-                            Layout.alignment: Qt.AlignVCenter
-                            implicitHeight: 34
-                            implicitWidth: 44
-                            onClicked: importMenu.open()
-                        }
-
-                        PillButton {
-                            text: "Reload adapters"
+                            text: "Import GSDML"
                             Layout.alignment: Qt.AlignVCenter
                             implicitHeight: 34
                             implicitWidth: 160
-                            onClicked: refreshAdapters()
+                            onClicked: importMenu.open()
                         }
+
                         PillButton {
                             text: "Reload adapters"
                             Layout.alignment: Qt.AlignVCenter
@@ -362,10 +371,9 @@ ApplicationWindow {
 
             Loader {
                 Layout.fillWidth: true
-                sourceComponent: wideLayout   // fixo wide (já que vai ficar maximizado)
+                sourceComponent: wideLayout
             }
 
-            // Output
             CardFrame {
                 title: "Output (JSON)"
                 Layout.fillWidth: true
@@ -373,14 +381,17 @@ ApplicationWindow {
 
                 RowLayout {
                     Layout.fillWidth: true
+
                     Item {
                         Layout.fillWidth: true
                     }
+
                     PillButton {
                         text: "Clear"
                         onClicked: logArea.text = ""
                     }
                 }
+
                 Flickable {
                     id: logFlick
                     Layout.fillWidth: true
@@ -388,14 +399,15 @@ ApplicationWindow {
                     clip: true
 
                     boundsBehavior: Flickable.StopAtBounds
+
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AsNeeded
                     }
+
                     ScrollBar.horizontal: ScrollBar {
                         policy: ScrollBar.AsNeeded
                     }
 
-                    // área "visível" do flick
                     contentWidth: Math.max(width, logArea.implicitWidth)
                     contentHeight: Math.max(height, logArea.implicitHeight)
 
@@ -409,13 +421,11 @@ ApplicationWindow {
                         selectionColor: cFocus
                         selectedTextColor: darkMode ? "#0b0f15" : "#ffffff"
 
-                        // importante: o TextArea precisa ter tamanho real dentro do Flickable
                         x: 0
                         y: 0
                         width: Math.max(logFlick.width, implicitWidth)
                         height: Math.max(logFlick.height, implicitHeight)
 
-                        // padding pra não colar nas bordas
                         leftPadding: 10
                         rightPadding: 10
                         topPadding: 8
@@ -435,9 +445,9 @@ ApplicationWindow {
         }
     }
 
-    // ---- Shared content blocks ----
     Component {
         id: discoveryCard
+
         CardFrame {
             title: "Discovery / Match"
 
@@ -453,24 +463,20 @@ ApplicationWindow {
 
                 ComboBox {
                     id: adapterCombo
-
-                    // força tamanho real (Layout às vezes ignora preferred)
                     Layout.preferredWidth: 280
                     Layout.minimumWidth: 280
                     Layout.maximumWidth: 280
                     implicitWidth: 280
                     width: 280
-
-                    // altura: use implicitHeight (Controls2 respeita melhor)
                     implicitHeight: 34
                     height: 34
-
                     font.pixelSize: 12
                     model: adaptersLm
                     textRole: "friendly_name"
-
                     currentIndex: selectedAdapterIndex
+
                     onCurrentIndexChanged: selectedAdapterIndex = currentIndex
+
                     contentItem: Text {
                         text: adapterCombo.displayText
                         color: cText
@@ -478,16 +484,16 @@ ApplicationWindow {
                         verticalAlignment: Text.AlignVCenter
                         elide: Text.ElideRight
                         leftPadding: 12
-                        rightPadding: 28   // espaço da seta
+                        rightPadding: 28
                     }
 
                     indicator: Canvas {
-                        id: arrow
                         width: 24
                         height: 24
                         anchors.right: parent.right
                         anchors.rightMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
+
                         onPaint: {
                             var ctx = getContext("2d");
                             ctx.clearRect(0, 0, width, height);
@@ -514,6 +520,7 @@ ApplicationWindow {
                     color: cMuted
                     font.pixelSize: 11
                 }
+
                 SmallSpin {
                     id: scanTimeout
                     from: 1
@@ -528,7 +535,6 @@ ApplicationWindow {
                     checked: true
                 }
 
-                // container do botão da direita (evita “grudar” na borda)
                 Item {
                     Layout.fillWidth: true
                 }
@@ -538,12 +544,11 @@ ApplicationWindow {
                     Layout.minimumWidth: win.actionBtnW
                     Layout.maximumWidth: win.actionBtnW
                     Layout.alignment: Qt.AlignRight
-                    Layout.rightMargin: 6     // <<< margem interna do card
+                    Layout.rightMargin: 6
                     height: win.actionBtnH
 
                     BusyIndicator {
                         anchors.verticalCenter: parent.verticalCenter
-                        // mantém posição horizontal atual (ex.: canto esquerdo)
                         anchors.left: parent.left
                         anchors.leftMargin: 12
                         running: scanning
@@ -551,20 +556,21 @@ ApplicationWindow {
                         implicitWidth: 22
                         implicitHeight: 22
                     }
+
                     PillButton {
                         anchors.fill: parent
                         text: scanning ? "Scanning..." : "Scan"
                         enabled: !scanning
+
                         onClicked: {
-                            if (adapterCombo.currentIndex < 0)
+                            const iface = selectedAdapterIface();
+                            if (!iface)
                                 return;
-                            const a = selectedAdapter();
-                            if (!a || !a.scapy_iface)
-                                return;
+
                             logArea.text = "Scanning... " + (new Date()).toLocaleString() + "\n";
                             devicesLm.clear();
                             selectedDeviceIndex = -1;
-                            backend.scanAsync(a.scapy_iface, scanTimeout.value, matchGsd.checked);
+                            backend.scanAsync(iface, scanTimeout.value, matchGsd.checked);
                         }
                     }
                 }
@@ -579,6 +585,7 @@ ApplicationWindow {
                     color: cMuted
                     font.pixelSize: 11
                 }
+
                 Field {
                     id: vendorId
                     text: "0x1234"
@@ -590,6 +597,7 @@ ApplicationWindow {
                     color: cMuted
                     font.pixelSize: 11
                 }
+
                 Field {
                     id: deviceId
                     text: "0x5678"
@@ -601,11 +609,13 @@ ApplicationWindow {
                     color: cMuted
                     font.pixelSize: 11
                 }
+
                 Field {
                     id: nameHint
                     text: ""
                     Layout.fillWidth: true
                 }
+
                 Item {
                     Layout.preferredWidth: win.actionBtnW
                     Layout.minimumWidth: win.actionBtnW
@@ -621,12 +631,12 @@ ApplicationWindow {
                     }
                 }
             }
+
             CardFrame {
                 title: "Devices Found"
                 Layout.fillWidth: true
                 Layout.preferredHeight: 320
 
-                // Header
                 Rectangle {
                     Layout.fillWidth: true
                     height: 32
@@ -647,39 +657,46 @@ ApplicationWindow {
                             font.pixelSize: 11
                             Layout.preferredWidth: 160
                         }
+
                         Label {
                             text: "IP"
                             color: cMuted
                             font.pixelSize: 11
                             Layout.preferredWidth: 140
                         }
+
                         Label {
                             text: "MAC"
                             color: cMuted
                             font.pixelSize: 11
                             Layout.preferredWidth: 170
                         }
+
                         Label {
                             text: "VendorID"
                             color: cMuted
                             font.pixelSize: 11
                             Layout.preferredWidth: 90
                         }
+
                         Label {
                             text: "DeviceID"
                             color: cMuted
                             font.pixelSize: 11
                             Layout.preferredWidth: 90
                         }
+
                         Label {
                             text: "GSD"
                             color: cMuted
                             font.pixelSize: 11
                             Layout.preferredWidth: 50
                         }
+
                         Item {
                             Layout.fillWidth: true
                         }
+
                         Label {
                             text: "Action"
                             color: cMuted
@@ -701,15 +718,17 @@ ApplicationWindow {
                         model: devicesLm
                         clip: true
                         spacing: 6
-
                         currentIndex: selectedDeviceIndex
+
                         onCurrentIndexChanged: selectedDeviceIndex = currentIndex
 
                         delegate: Rectangle {
                             width: devicesList.width
                             height: 38
                             radius: 10
-                            color: (index === devicesList.currentIndex) ? (win.darkMode ? "#182133" : "#e7effb") : (win.darkMode ? "#0f1218" : "#ffffff")
+                            color: (index === devicesList.currentIndex)
+                                   ? (win.darkMode ? "#182133" : "#e7effb")
+                                   : (win.darkMode ? "#0f1218" : "#ffffff")
                             border.color: (index === devicesList.currentIndex) ? win.cFocus : win.cBorder
                             border.width: 1
 
@@ -732,6 +751,7 @@ ApplicationWindow {
                                     Layout.preferredWidth: 160
                                     verticalAlignment: Text.AlignVCenter
                                 }
+
                                 Text {
                                     text: model.ip
                                     color: cText
@@ -740,6 +760,7 @@ ApplicationWindow {
                                     Layout.preferredWidth: 140
                                     verticalAlignment: Text.AlignVCenter
                                 }
+
                                 Text {
                                     text: model.mac
                                     color: cText
@@ -749,6 +770,7 @@ ApplicationWindow {
                                     Layout.preferredWidth: 170
                                     verticalAlignment: Text.AlignVCenter
                                 }
+
                                 Text {
                                     text: model.vendor_id
                                     color: cText
@@ -757,6 +779,7 @@ ApplicationWindow {
                                     Layout.preferredWidth: 90
                                     verticalAlignment: Text.AlignVCenter
                                 }
+
                                 Text {
                                     text: model.device_id
                                     color: cText
@@ -765,6 +788,7 @@ ApplicationWindow {
                                     Layout.preferredWidth: 90
                                     verticalAlignment: Text.AlignVCenter
                                 }
+
                                 Text {
                                     property real score: Number(model.gsd_match_score)
                                     text: (model.gsd_match !== null && model.gsd_match !== undefined && String(model.gsd_match) !== "") ? "✓" : "-"
@@ -786,24 +810,20 @@ ApplicationWindow {
                                         anchors.fill: parent
                                         text: "Blink"
                                         enabled: model.mac !== ""
+
                                         onClicked: {
-                                            // garante seleção ao clicar no blink
                                             devicesList.currentIndex = index;
-                                            if (adapterCombo.currentIndex < 0)
+                                            const iface = selectedAdapterIface();
+                                            if (!iface || !model.mac)
                                                 return;
-                                            const a = adaptersModel[adapterCombo.currentIndex];
-                                            if (!a || !a.scapy_iface)
-                                                return;
-                                            if (!model.mac)
-                                                return;
-                                            logArea.text = backend.dcpBlink(a.scapy_iface, model.mac, true, 10.0);
+
+                                            logArea.text = backend.dcpBlink(iface, model.mac, true, 10.0);
                                         }
                                     }
                                 }
                             }
                         }
 
-                        // Empty state
                         footer: Item {
                             width: devicesList.width
                             height: (devicesLm.count === 0) ? 80 : 0
@@ -827,6 +847,7 @@ ApplicationWindow {
 
         CardFrame {
             title: "Validate / DCP"
+
             function fillIpFieldsFromSelection() {
                 const d = win.selectedDevice();
                 if (!d) {
@@ -836,7 +857,6 @@ ApplicationWindow {
                     return;
                 }
 
-                // só sobrescreve se o usuário não estiver editando naquele momento
                 if (!ip.activeFocus)
                     ip.text = win.s(d.ip);
                 if (!mask.activeFocus)
@@ -847,23 +867,24 @@ ApplicationWindow {
 
             Connections {
                 target: win
+
                 function onSelectedDeviceIndexChanged() {
                     fillIpFieldsFromSelection();
                 }
             }
-            // -------- Row 1: Target + MAC (mais compacto e “encaixado” no painel direito)
+
             GridLayout {
                 Layout.fillWidth: true
                 columns: 4
                 columnSpacing: 10
                 rowSpacing: 8
 
-                // Target
                 Label {
                     text: "Target"
                     color: cMuted
                     font.pixelSize: 11
                 }
+
                 ComboBox {
                     id: deviceCombo
                     Layout.fillWidth: true
@@ -874,6 +895,7 @@ ApplicationWindow {
                     onCurrentIndexChanged: selectedDeviceIndex = currentIndex
                     implicitHeight: 34
                     height: 34
+
                     background: Rectangle {
                         radius: 10
                         color: cFieldBg
@@ -882,12 +904,12 @@ ApplicationWindow {
                     }
                 }
 
-                // MAC
                 Label {
                     text: "MAC"
                     color: cMuted
                     font.pixelSize: 11
                 }
+
                 Field {
                     Layout.fillWidth: true
                     Layout.columnSpan: 3
@@ -896,7 +918,6 @@ ApplicationWindow {
                 }
             }
 
-            // -------- Row 2: Scenario + Validate (botão fixo à direita)
             GridLayout {
                 Layout.fillWidth: true
                 columns: 4
@@ -934,6 +955,7 @@ ApplicationWindow {
                         anchors.right: parent.right
                         anchors.rightMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
+
                         onPaint: {
                             var ctx = getContext("2d");
                             ctx.clearRect(0, 0, width, height);
@@ -969,7 +991,6 @@ ApplicationWindow {
                 }
             }
 
-            // -------- Row 3: SetName
             GridLayout {
                 Layout.fillWidth: true
                 columns: 4
@@ -981,6 +1002,7 @@ ApplicationWindow {
                     color: cMuted
                     font.pixelSize: 11
                 }
+
                 Field {
                     id: newStation
                     Layout.fillWidth: true
@@ -997,26 +1019,25 @@ ApplicationWindow {
                     PillButton {
                         anchors.fill: parent
                         text: "SetName"
+
                         onClicked: {
-                            if (adapterCombo.currentIndex < 0)
-                                return;
-                            const a = adaptersModel[adapterCombo.currentIndex];
+                            const iface = selectedAdapterIface();
                             const d = selectedDevice();
-                            if (!a || !a.scapy_iface)
+                            if (!iface)
                                 return;
                             if (!d || !d.mac)
                                 return;
-                            logArea.text = backend.dcpSetName(a.scapy_iface, d.mac, newStation.text);
+
+                            logArea.text = backend.dcpSetName(iface, d.mac, newStation.text);
                         }
                     }
                 }
             }
-            // -------- Row 4+5: IP/Mask/GW na esquerda + SetIP na direita (ocupando altura dos 3 campos)
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
 
-                // Left column: IP / Mask / GW
                 GridLayout {
                     Layout.fillWidth: true
                     columns: 2
@@ -1028,6 +1049,7 @@ ApplicationWindow {
                         color: cMuted
                         font.pixelSize: 11
                     }
+
                     Field {
                         id: ip
                         Layout.fillWidth: true
@@ -1039,6 +1061,7 @@ ApplicationWindow {
                         color: cMuted
                         font.pixelSize: 11
                     }
+
                     Field {
                         id: mask
                         Layout.fillWidth: true
@@ -1050,6 +1073,7 @@ ApplicationWindow {
                         color: cMuted
                         font.pixelSize: 11
                     }
+
                     Field {
                         id: gw
                         Layout.fillWidth: true
@@ -1057,35 +1081,30 @@ ApplicationWindow {
                     }
                 }
 
-                // Right column: SetIP button fills the height of the 3 rows
                 Item {
                     Layout.preferredWidth: win.actionBtnW
                     Layout.minimumWidth: win.actionBtnW
                     Layout.maximumWidth: win.actionBtnW
-
-                    // altura = 3 campos (34) + 2 gaps (8)  -> 34*3 + 8*2 = 118
-                    // se você mudar heights/spacings, ajusta aqui também
                     height: 34 * 3 + 8 * 2
 
                     PillButton {
                         anchors.fill: parent
                         text: "SetIP"
+
                         onClicked: {
-                            if (adapterCombo.currentIndex < 0)
-                                return;
-                            const a = adaptersModel[adapterCombo.currentIndex];
+                            const iface = selectedAdapterIface();
                             const d = selectedDevice();
-                            if (!a || !a.scapy_iface)
+                            if (!iface)
                                 return;
                             if (!d || !d.mac)
                                 return;
-                            logArea.text = backend.dcpSetIp(a.scapy_iface, d.mac, ip.text, mask.text, gw.text);
+
+                            logArea.text = backend.dcpSetIp(iface, d.mac, ip.text, mask.text, gw.text);
                         }
                     }
                 }
             }
 
-            // -------- Row 6: Blink + Factory Reset (grid limpo, sem “buracos”)
             GridLayout {
                 Layout.fillWidth: true
                 columns: 2
@@ -1095,32 +1114,32 @@ ApplicationWindow {
                 PillButton {
                     Layout.fillWidth: true
                     text: "Blink ON"
+
                     onClicked: {
-                        if (adapterCombo.currentIndex < 0)
-                            return;
-                        const a = adaptersModel[adapterCombo.currentIndex];
+                        const iface = selectedAdapterIface();
                         const d = selectedDevice();
-                        if (!a || !a.scapy_iface)
+                        if (!iface)
                             return;
                         if (!d || !d.mac)
                             return;
-                        logArea.text = backend.dcpBlink(a.scapy_iface, d.mac, true, 10.0);
+
+                        logArea.text = backend.dcpBlink(iface, d.mac, true, 10.0);
                     }
                 }
 
                 PillButton {
                     Layout.fillWidth: true
                     text: "Blink OFF"
+
                     onClicked: {
-                        if (adapterCombo.currentIndex < 0)
-                            return;
-                        const a = adaptersModel[adapterCombo.currentIndex];
+                        const iface = selectedAdapterIface();
                         const d = selectedDevice();
-                        if (!a || !a.scapy_iface)
+                        if (!iface)
                             return;
                         if (!d || !d.mac)
                             return;
-                        logArea.text = backend.dcpBlink(a.scapy_iface, d.mac, false, 10.0);
+
+                        logArea.text = backend.dcpBlink(iface, d.mac, false, 10.0);
                     }
                 }
 
@@ -1128,25 +1147,25 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.columnSpan: 2
                     text: "Factory Reset"
+
                     onClicked: {
-                        if (adapterCombo.currentIndex < 0)
-                            return;
-                        const a = adaptersModel[adapterCombo.currentIndex];
+                        const iface = selectedAdapterIface();
                         const d = selectedDevice();
-                        if (!a || !a.scapy_iface)
+                        if (!iface)
                             return;
                         if (!d || !d.mac)
                             return;
-                        logArea.text = backend.dcpFactoryReset(a.scapy_iface, d.mac);
+
+                        logArea.text = backend.dcpFactoryReset(iface, d.mac);
                     }
                 }
             }
         }
     }
 
-    // ---- Layout fixo wide (já que está maximizado) ----
     Component {
         id: wideLayout
+
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
@@ -1172,22 +1191,26 @@ ApplicationWindow {
 
     Component {
         id: narrowLayout
+
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 12
+
             Loader {
                 Layout.fillWidth: true
                 sourceComponent: discoveryCard
             }
+
             Loader {
-                id: validateLoader
+                id: validateLoaderNarrow
                 Layout.fillWidth: true
                 sourceComponent: validateCard
 
-                Component.onCompleted: win.validateLoaderRef = validateLoader
+                Component.onCompleted: win.validateLoaderRef = validateLoaderNarrow
             }
         }
     }
+
     Connections {
         target: backend
 
@@ -1200,9 +1223,11 @@ ApplicationWindow {
             logArea.text = txt;
             devicesLm.clear();
             selectedDeviceIndex = -1;
+
             try {
                 const obj = JSON.parse(txt);
                 const devs = obj.devices || [];
+
                 for (let i = 0; i < devs.length; i++) {
                     devicesLm.append({
                         name: s(devs[i].name),
@@ -1213,15 +1238,17 @@ ApplicationWindow {
                         vendor_name: s(devs[i].vendor_name),
                         device_type: s(devs[i].device_type),
                         gsd_match: (devs[i].gsd_match === null || devs[i].gsd_match === undefined) ? "" : devs[i].gsd_match,
-                        // <<< ADD
                         gsd_match_reason: s(devs[i].gsd_match_reason),
-                        // <<< opcional
-                        gsd_match_score: devs[i].gsd_match_score       // <<< deixa numérico, sem s()
+                        gsd_match_score: devs[i].gsd_match_score,
+                        mask: s(devs[i].mask),
+                        gateway: s(devs[i].gateway)
                     });
                 }
+
                 if (devicesLm.count > 0)
                     selectedDeviceIndex = 0;
-            } catch (e) {}
+            } catch (e) {
+            }
         }
 
         function onScanError(txt) {

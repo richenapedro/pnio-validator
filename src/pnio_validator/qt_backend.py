@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import QObject, Slot, Signal, QThread
 
-from .cli import _build_service  # keep single source of wiring
+from .cli import _build_service
 from .app_service import AppService
 
 
@@ -49,11 +49,6 @@ class _ScanWorker(QObject):
 
 
 class QtBackend(QObject):
-    """Qt/QML bridge for AppService.
-
-    All methods return JSON strings to keep QML integration minimal.
-    """
-
     scanStarted = Signal()
     scanFinished = Signal(str)
     scanError = Signal(str)
@@ -65,26 +60,20 @@ class QtBackend(QObject):
         self._scan_thread: Optional[QThread] = None
         self._scan_worker: Optional[_ScanWorker] = None
 
-    # -------- Helpers --------
-
     def _ok(self, payload: Dict[str, Any]) -> str:
         return _json_dumps(payload)
 
     def _err(self, message: str, *, details: Any = None) -> str:
         return _json_dumps({"ok": False, "error": message, "details": details})
 
-    # -------- Adapters --------
-
     @Slot(str, result=str)
     def importGsdmlFiles(self, files_json: str) -> str:
-        # files_json: '["file:///C:/a.xml","file:///C:/b.xml"]'
         return self._service.importGsdmlFiles(files_json)
 
     @Slot(str, result=str)
     def importGsdmlFolder(self, folder_url: str) -> str:
-        # folder_url: "file:///C:/some/folder"
         return self._service.importGsdmlFolder(folder_url)
-    
+
     @Slot(result=str)
     def listAdapters(self) -> str:
         try:
@@ -92,11 +81,8 @@ class QtBackend(QObject):
         except Exception as e:
             return self._err("list_adapters_failed", details=str(e))
 
-    # -------- Scan (ASYNC for GUI) --------
-
     @Slot(str, float, bool)
     def scanAsync(self, iface: str, timeout_s: float = 5.0, match_gsd: bool = False) -> None:
-        # evita scan concorrente
         if self._scan_thread is not None:
             return
 
@@ -111,7 +97,6 @@ class QtBackend(QObject):
         self._scan_worker.finished.connect(self._on_scan_finished)
         self._scan_worker.failed.connect(self._on_scan_failed)
 
-        # cleanup: quit thread, delete worker, delete thread
         self._scan_worker.finished.connect(self._scan_thread.quit)
         self._scan_worker.failed.connect(self._scan_thread.quit)
 
@@ -126,18 +111,15 @@ class QtBackend(QObject):
     @Slot(str)
     def _on_scan_finished(self, txt: str) -> None:
         self.scanFinished.emit(txt)
-        # não limpa thread aqui; espera thread.finished
 
     @Slot(str)
     def _on_scan_failed(self, txt: str) -> None:
         self.scanError.emit(txt)
-        # não limpa thread aqui; espera thread.finished
 
     @Slot()
     def _on_scan_thread_finished(self) -> None:
         self._scan_worker = None
         self._scan_thread = None
-    # -------- Scan (SYNC, keep for CLI/debug) --------
 
     @Slot(str, float, bool, result=str)
     def scan(self, iface: str, timeout_s: float = 5.0, match_gsd: bool = False) -> str:
@@ -151,8 +133,6 @@ class QtBackend(QObject):
         except Exception as e:
             return self._err("scan_failed", details=str(e))
 
-    # -------- Match --------
-
     @Slot(str, str, str, result=str)
     def match(self, vendor_id: str, device_id: str, name: str = "") -> str:
         try:
@@ -163,7 +143,9 @@ class QtBackend(QObject):
         except Exception as e:
             return self._err("match_failed", details=str(e))
 
-    # -------- Validate --------
+    @Slot(str, str, str, result=str)
+    def matchGui(self, vendor_id: str, device_id: str, name: str = "") -> str:
+        return self.match(vendor_id, device_id, name)
 
     @Slot(str, str, int, int, int, int, float, float, int, result=str)
     def validateFake(
@@ -204,8 +186,6 @@ class QtBackend(QObject):
         except Exception as e:
             return self._err("validate_failed", details=str(e))
 
-    # -------- DCP (fake-friendly) --------
-
     @Slot(str, str, result=str)
     def dcpSetNameFake(self, device_name: str, new_name: str) -> str:
         try:
@@ -223,7 +203,13 @@ class QtBackend(QObject):
             )
             res = self._service.dcp_set_name(args)
             return self._ok(
-                {"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error}
+                {
+                    "ok": True,
+                    "action": res.action,
+                    "target_mac": res.target_mac,
+                    "latency_ms": res.latency_ms,
+                    "error": res.error,
+                }
             )
         except Exception as e:
             return self._err("dcp_set_name_failed", details=str(e))
@@ -247,7 +233,13 @@ class QtBackend(QObject):
             )
             res = self._service.dcp_set_ip(args)
             return self._ok(
-                {"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error}
+                {
+                    "ok": True,
+                    "action": res.action,
+                    "target_mac": res.target_mac,
+                    "latency_ms": res.latency_ms,
+                    "error": res.error,
+                }
             )
         except Exception as e:
             return self._err("dcp_set_ip_failed", details=str(e))
@@ -270,7 +262,13 @@ class QtBackend(QObject):
             )
             res = self._service.dcp_blink(args)
             return self._ok(
-                {"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error}
+                {
+                    "ok": True,
+                    "action": res.action,
+                    "target_mac": res.target_mac,
+                    "latency_ms": res.latency_ms,
+                    "error": res.error,
+                }
             )
         except Exception as e:
             return self._err("dcp_blink_failed", details=str(e))
@@ -290,7 +288,83 @@ class QtBackend(QObject):
             )
             res = self._service.dcp_factory_reset(args)
             return self._ok(
-                {"ok": True, "action": res.action, "target_mac": res.target_mac, "latency_ms": res.latency_ms, "error": res.error}
+                {
+                    "ok": True,
+                    "action": res.action,
+                    "target_mac": res.target_mac,
+                    "latency_ms": res.latency_ms,
+                    "error": res.error,
+                }
+            )
+        except Exception as e:
+            return self._err("dcp_factory_reset_failed", details=str(e))
+
+    @Slot(str, str, bool, float, result=str)
+    def dcpBlink(self, iface: str, target_mac: str, on: bool = True, duration_s: float = 10.0) -> str:
+        try:
+            return self._service.dcpBlink(
+                str(iface),
+                str(target_mac).strip().lower(),
+                bool(on),
+                float(duration_s),
+            )
+        except Exception as e:
+            return self._err("dcp_blink_failed", details=str(e))
+
+    @Slot(str, str, str, result=str)
+    def dcpSetName(self, iface: str, target_mac: str, new_name: str) -> str:
+        try:
+            return self._service.dcpSetName(
+                str(iface),
+                str(target_mac).strip().lower(),
+                str(new_name),
+            )
+        except Exception as e:
+            return self._err("dcp_set_name_failed", details=str(e))
+
+    @Slot(str, str, str, str, str, result=str)
+    def dcpSetIp(self, iface: str, target_mac: str, ipv4: str, mask: str, gw: str = "0.0.0.0") -> str:
+        try:
+            return self._service.dcpSetIp(
+                str(iface),
+                str(target_mac).strip().lower(),
+                str(ipv4),
+                str(mask),
+                str(gw),
+            )
+        except Exception as e:
+            return self._err("dcp_set_ip_failed", details=str(e))
+
+    @Slot(str, str, result=str)
+    def dcpFactoryReset(self, iface: str, target_mac: str) -> str:
+        try:
+            return self._service.dcpFactoryReset(
+                str(iface),
+                str(target_mac).strip().lower(),
+            )
+        except Exception as e:
+            return self._err("dcp_factory_reset_failed", details=str(e))
+        try:
+            args = SimpleNamespace(
+                fake=False,
+                iface=str(iface),
+                adapter=None,
+                mac=str(target_mac),
+                ip=None,
+                device_name=None,
+                scan_timeout=0.0,
+                timeout=0.0,
+                no_wait=False,
+            )
+            res = self._service.dcp_factory_reset(args)
+            return self._ok(
+                {
+                    "ok": True,
+                    "action": res.action,
+                    "target_mac": res.target_mac,
+                    "latency_ms": res.latency_ms,
+                    "error": res.error,
+                }
             )
         except Exception as e:
             return self._err("dcp_factory_reset_failed", details=str(e))

@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0"]
+qt = ["PySide6>=6.5.0"]
 
 [project.scripts]
 pnio-validator = "pnio_validator.cli:main"

@@ -256,7 +256,8 @@ class AppService:
                 wait_response=True,
                 no_wait=False,
             )
-            return _to_json_ok(action="dcpSetName", result=res)
+            payload = res.to_dict() if hasattr(res, "to_dict") else res
+            return _to_json_ok(action="dcpSetName", result=payload)
         except Exception as e:
             return _to_json_err("dcpSetName", e, raw={"iface": scapy_iface, "mac": target_mac, "name": new_name})
 
@@ -274,7 +275,8 @@ class AppService:
                 wait_response=True,
                 no_wait=False,
             )
-            return _to_json_ok(action="dcpSetIp", result=res)
+            payload = res.to_dict() if hasattr(res, "to_dict") else res
+            return _to_json_ok(action="dcpSetIp", result=payload)
         except Exception as e:
             return _to_json_err("dcpSetIp", e, raw={"iface": scapy_iface, "mac": target_mac, "ip": ip, "mask": mask, "gw": gw})
 
@@ -290,7 +292,8 @@ class AppService:
                 wait_response=True,
                 no_wait=False,
             )
-            return _to_json_ok(action="dcpBlink", result=res)
+            payload = res.to_dict() if hasattr(res, "to_dict") else res
+            return _to_json_ok(action="dcpBlink", result=payload)
         except Exception as e:
             return _to_json_err("dcpBlink", e, raw={"iface": scapy_iface, "mac": target_mac, "on": on, "duration_s": duration_s})
 
@@ -303,10 +306,10 @@ class AppService:
                 wait_response=True,
                 no_wait=False,
             )
-            return _to_json_ok(action="dcpFactoryReset", result=res)
+            payload = res.to_dict() if hasattr(res, "to_dict") else res
+            return _to_json_ok(action="dcpFactoryReset", result=payload)
         except Exception as e:
             return _to_json_err("dcpFactoryReset", e, raw={"iface": scapy_iface, "mac": target_mac})
-
     # ======================================================================
     # CLI API (kept as-is)
     # ======================================================================
