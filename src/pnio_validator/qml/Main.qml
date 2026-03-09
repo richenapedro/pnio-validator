@@ -44,7 +44,18 @@ ApplicationWindow {
     property int selectedDeviceIndex: -1
     property var adaptersModel: []
     property bool scanning: false
+    function hasValidSelectedDevice() {
+        const d = selectedDevice();
+        return d !== null && d !== undefined && s(d.name) !== "" && s(d.mac) !== "";
+    }
 
+    function hasValidAdapter() {
+        return selectedAdapterIface() !== "";
+    }
+
+    function canRunDeviceAction() {
+        return hasValidAdapter() && hasValidSelectedDevice();
+    }
     function selectedAdapter() {
         if (selectedAdapterIndex < 0 || selectedAdapterIndex >= adaptersLm.count)
             return null;
@@ -75,12 +86,10 @@ ApplicationWindow {
         logArea.text = txt;
         adaptersLm.clear();
         adaptersModel = [];
-
         try {
             const obj = JSON.parse(txt);
             const arr = obj.adapters || [];
             adaptersModel = arr;
-
             for (let i = 0; i < arr.length; i++) {
                 const a = arr[i] || {};
                 adaptersLm.append({
@@ -116,11 +125,7 @@ ApplicationWindow {
 
         background: Rectangle {
             radius: 10
-            color: control.down
-                   ? (win.darkMode ? "#1a2536" : "#e8eef8")
-                   : (control.hovered
-                      ? (win.darkMode ? "#1b2a3f" : "#eef3fb")
-                      : (win.darkMode ? "#182131" : "#e9eff9"))
+            color: control.down ? (win.darkMode ? "#1a2536" : "#e8eef8") : (control.hovered ? (win.darkMode ? "#1b2a3f" : "#eef3fb") : (win.darkMode ? "#182131" : "#e9eff9"))
             border.color: control.enabled ? win.cFieldBd : win.cBorder
             border.width: 1
         }
@@ -566,7 +571,6 @@ ApplicationWindow {
                             const iface = selectedAdapterIface();
                             if (!iface)
                                 return;
-
                             logArea.text = "Scanning... " + (new Date()).toLocaleString() + "\n";
                             devicesLm.clear();
                             selectedDeviceIndex = -1;
@@ -726,9 +730,7 @@ ApplicationWindow {
                             width: devicesList.width
                             height: 38
                             radius: 10
-                            color: (index === devicesList.currentIndex)
-                                   ? (win.darkMode ? "#182133" : "#e7effb")
-                                   : (win.darkMode ? "#0f1218" : "#ffffff")
+                            color: (index === devicesList.currentIndex) ? (win.darkMode ? "#182133" : "#e7effb") : (win.darkMode ? "#0f1218" : "#ffffff")
                             border.color: (index === devicesList.currentIndex) ? win.cFocus : win.cBorder
                             border.width: 1
 
@@ -809,14 +811,13 @@ ApplicationWindow {
                                     PillButton {
                                         anchors.fill: parent
                                         text: "Blink"
-                                        enabled: model.mac !== ""
+                                        enabled: hasValidAdapter() && model.mac !== ""
 
                                         onClicked: {
                                             devicesList.currentIndex = index;
                                             const iface = selectedAdapterIface();
                                             if (!iface || !model.mac)
                                                 return;
-
                                             logArea.text = backend.dcpBlink(iface, model.mac, true, 10.0);
                                         }
                                     }
@@ -856,7 +857,6 @@ ApplicationWindow {
                     gw.text = "";
                     return;
                 }
-
                 if (!ip.activeFocus)
                     ip.text = win.s(d.ip);
                 if (!mask.activeFocus)
@@ -986,7 +986,23 @@ ApplicationWindow {
                     PillButton {
                         anchors.fill: parent
                         text: "Validate"
-                        onClicked: logArea.text = backend.validateFake((selectedDevice() ? selectedDevice().name : ""), scenario.currentText)
+                        enabled: canRunDeviceAction()
+
+                        onClicked: {
+                            const iface = selectedAdapterIface();
+                            const d = selectedDevice();
+                            if (!iface || !d || !d.name)
+                                return;
+                            logArea.text = backend.validateReal(iface, d.name, 0      // slot
+                            , 1      // subslot
+                            , 3000   // timeout_ms
+                            , 1      // retries
+                            , 2048   // len_aff0
+                            , 24576  // len_f841
+                            , 32     // min_aff0_bytes
+                            , 0.90    // min_f841_ratio
+                            );
+                        }
                     }
                 }
             }
@@ -1019,7 +1035,7 @@ ApplicationWindow {
                     PillButton {
                         anchors.fill: parent
                         text: "SetName"
-
+                        enabled: canRunDeviceAction()
                         onClicked: {
                             const iface = selectedAdapterIface();
                             const d = selectedDevice();
@@ -1027,7 +1043,6 @@ ApplicationWindow {
                                 return;
                             if (!d || !d.mac)
                                 return;
-
                             logArea.text = backend.dcpSetName(iface, d.mac, newStation.text);
                         }
                     }
@@ -1090,7 +1105,7 @@ ApplicationWindow {
                     PillButton {
                         anchors.fill: parent
                         text: "SetIP"
-
+                        enabled: canRunDeviceAction() && ip.text.trim() !== "" && mask.text.trim() !== ""
                         onClicked: {
                             const iface = selectedAdapterIface();
                             const d = selectedDevice();
@@ -1098,7 +1113,6 @@ ApplicationWindow {
                                 return;
                             if (!d || !d.mac)
                                 return;
-
                             logArea.text = backend.dcpSetIp(iface, d.mac, ip.text, mask.text, gw.text);
                         }
                     }
@@ -1114,7 +1128,7 @@ ApplicationWindow {
                 PillButton {
                     Layout.fillWidth: true
                     text: "Blink ON"
-
+                    enabled: canRunDeviceAction()
                     onClicked: {
                         const iface = selectedAdapterIface();
                         const d = selectedDevice();
@@ -1122,7 +1136,6 @@ ApplicationWindow {
                             return;
                         if (!d || !d.mac)
                             return;
-
                         logArea.text = backend.dcpBlink(iface, d.mac, true, 10.0);
                     }
                 }
@@ -1130,7 +1143,7 @@ ApplicationWindow {
                 PillButton {
                     Layout.fillWidth: true
                     text: "Blink OFF"
-
+                    enabled: canRunDeviceAction()
                     onClicked: {
                         const iface = selectedAdapterIface();
                         const d = selectedDevice();
@@ -1138,7 +1151,6 @@ ApplicationWindow {
                             return;
                         if (!d || !d.mac)
                             return;
-
                         logArea.text = backend.dcpBlink(iface, d.mac, false, 10.0);
                     }
                 }
@@ -1155,7 +1167,6 @@ ApplicationWindow {
                             return;
                         if (!d || !d.mac)
                             return;
-
                         logArea.text = backend.dcpFactoryReset(iface, d.mac);
                     }
                 }
@@ -1223,11 +1234,9 @@ ApplicationWindow {
             logArea.text = txt;
             devicesLm.clear();
             selectedDeviceIndex = -1;
-
             try {
                 const obj = JSON.parse(txt);
                 const devs = obj.devices || [];
-
                 for (let i = 0; i < devs.length; i++) {
                     devicesLm.append({
                         name: s(devs[i].name),
@@ -1244,11 +1253,9 @@ ApplicationWindow {
                         gateway: s(devs[i].gateway)
                     });
                 }
-
                 if (devicesLm.count > 0)
                     selectedDeviceIndex = 0;
-            } catch (e) {
-            }
+            } catch (e) {}
         }
 
         function onScanError(txt) {

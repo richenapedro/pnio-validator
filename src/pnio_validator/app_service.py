@@ -151,6 +151,7 @@ class AppService:
                 e,
                 raw={"vendor_id": vendor_id_text, "device_id": device_id_text, "name": name_hint},
             )
+        
     def importGsdmlFiles(self, files_json: str) -> str:
         """GUI: import multiple GSDML files. `files_json` is a JSON list of file URLs/paths."""
         try:
@@ -179,7 +180,7 @@ class AppService:
                 fp = _to_path(item)
                 try:
                     entry = self.registry.import_gsdml(fp)  # see note below
-                    imported.append(entry.to_dict() if hasattr(entry, "to_dict") else entry)
+                    imported.append(entry.to_dict() if hasattr(entry, "to_dict") and callable(entry.to_dict) else entry)
                 except Exception as e:
                     errors.append({"file": fp, "error": str(e)})
 
@@ -211,7 +212,7 @@ class AppService:
             for f in xmls:
                 try:
                     entry = self.registry.import_gsdml(f)  # see note below
-                    imported.append(entry.to_dict() if hasattr(entry, "to_dict") else entry)
+                    imported.append(entry.to_dict() if hasattr(entry, "to_dict") and callable(entry.to_dict) else entry)
                 except Exception as e:
                     errors.append({"file": str(f), "error": str(e)})
 
@@ -245,7 +246,7 @@ class AppService:
 
         except Exception as e:
             return _to_json_err("validateFake", e, raw={"device_name": device_name, "scenario": scenario})
-
+        
     def dcpSetName(self, scapy_iface: str, target_mac: str, new_name: str) -> str:
         try:
             client = self.dcp_real(iface=str(scapy_iface), timeout_s=3.0)
@@ -256,7 +257,7 @@ class AppService:
                 wait_response=True,
                 no_wait=False,
             )
-            payload = res.to_dict() if hasattr(res, "to_dict") else res
+            payload = self._result_to_payload(res)
             return _to_json_ok(action="dcpSetName", result=payload)
         except Exception as e:
             return _to_json_err("dcpSetName", e, raw={"iface": scapy_iface, "mac": target_mac, "name": new_name})
@@ -275,7 +276,7 @@ class AppService:
                 wait_response=True,
                 no_wait=False,
             )
-            payload = res.to_dict() if hasattr(res, "to_dict") else res
+            payload = self._result_to_payload(res)
             return _to_json_ok(action="dcpSetIp", result=payload)
         except Exception as e:
             return _to_json_err("dcpSetIp", e, raw={"iface": scapy_iface, "mac": target_mac, "ip": ip, "mask": mask, "gw": gw})
@@ -292,7 +293,7 @@ class AppService:
                 wait_response=True,
                 no_wait=False,
             )
-            payload = res.to_dict() if hasattr(res, "to_dict") else res
+            payload = self._result_to_payload(res)
             return _to_json_ok(action="dcpBlink", result=payload)
         except Exception as e:
             return _to_json_err("dcpBlink", e, raw={"iface": scapy_iface, "mac": target_mac, "on": on, "duration_s": duration_s})
@@ -306,7 +307,7 @@ class AppService:
                 wait_response=True,
                 no_wait=False,
             )
-            payload = res.to_dict() if hasattr(res, "to_dict") else res
+            payload = self._result_to_payload(res)
             return _to_json_ok(action="dcpFactoryReset", result=payload)
         except Exception as e:
             return _to_json_err("dcpFactoryReset", e, raw={"iface": scapy_iface, "mac": target_mac})
@@ -512,7 +513,7 @@ class AppService:
     def validate_payload(self, args: Any) -> Dict[str, Any]:
         result, meta = self.validate_device(args)
 
-        result_d = result.to_dict() if hasattr(result, "to_dict") else result
+        result_d = result.to_dict() if hasattr(result, "to_dict") and callable(result.to_dict) else result
 
         if hasattr(meta, "to_dict") and callable(meta.to_dict):
             meta_d = meta.to_dict()
@@ -522,3 +523,59 @@ class AppService:
             meta_d = meta.__dict__ if hasattr(meta, "__dict__") else {"repr": repr(meta)}
 
         return {"result": result_d, "meta": meta_d}
+    
+    def _result_to_payload(self, obj):
+        return obj.to_dict() if hasattr(obj, "to_dict") and callable(obj.to_dict) else obj
+
+    def validateReal(
+        self,
+        scapy_iface: str,
+        device_name: str,
+        slot: int = 0,
+        subslot: int = 1,
+        timeout_ms: int = 3000,
+        retries: int = 1,
+        len_aff0: int = 2048,
+        len_f841: int = 24576,
+        min_aff0_bytes: int = 32,
+        min_f841_ratio: float = 0.90,
+    ) -> str:
+        try:
+            args = SimpleNamespace(
+                fake=False,
+                iface=str(scapy_iface),
+                adapter=None,
+                device_name=str(device_name),
+                scenario=None,
+                slot=int(slot),
+                subslot=int(subslot),
+                timeout_ms=int(timeout_ms),
+                retries=int(retries),
+                base_latency_ms=0.0,
+                extra_latency_ms=0.0,
+                len_aff0=int(len_aff0),
+                len_f841=int(len_f841),
+                min_aff0_bytes=int(min_aff0_bytes),
+                min_f841_ratio=float(min_f841_ratio),
+            )
+
+            payload = self.validate_payload(args)
+            return _to_json_ok(**payload)
+
+        except Exception as e:
+            return _to_json_err(
+                "validateReal",
+                e,
+                raw={
+                    "iface": scapy_iface,
+                    "device_name": device_name,
+                    "slot": slot,
+                    "subslot": subslot,
+                    "timeout_ms": timeout_ms,
+                    "retries": retries,
+                    "len_aff0": len_aff0,
+                    "len_f841": len_f841,
+                    "min_aff0_bytes": min_aff0_bytes,
+                    "min_f841_ratio": min_f841_ratio,
+                },
+            )

@@ -368,3 +368,33 @@ class QtBackend(QObject):
             )
         except Exception as e:
             return self._err("dcp_factory_reset_failed", details=str(e))
+        
+    @Slot(str, str, int, int, int, int, int, int, float, result=str)
+    def validateReal(
+        self,
+        iface: str,
+        device_name: str,
+        slot: int = 0,
+        subslot: int = 1,
+        timeout_ms: int = 3000,
+        retries: int = 1,
+        len_aff0: int = 2048,
+        len_f841: int = 24576,
+        min_aff0_bytes: int = 32,
+        min_f841_ratio: float = 0.90,
+    ) -> str:
+        try:
+            return self._service.validateReal(
+                scapy_iface=str(iface),
+                device_name=str(device_name),
+                slot=int(slot),
+                subslot=int(subslot),
+                timeout_ms=int(timeout_ms),
+                retries=int(retries),
+                len_aff0=int(len_aff0),
+                len_f841=int(len_f841),
+                min_aff0_bytes=int(min_aff0_bytes),
+                min_f841_ratio=float(min_f841_ratio),
+            )
+        except Exception as e:
+            return self._err("validate_real_failed", details=str(e))
